@@ -10,6 +10,9 @@
     python -m quant_engine dashboard [--port 8501]
     python -m quant_engine dukascopy --start 2026-05-01 [--end 2026-11-24]   (free history, no MT5)
     python -m quant_engine backtest [--source mt5|dukascopy] [--start ...] [--end ...]
+    python -m quant_engine run [--dry-run] [--once]      (live signals to Telegram; never trades)
+    python -m quant_engine news                           (refresh the economic calendar, show blocks)
+    python -m quant_engine telegram-test                  (send a test message)
 """
 from __future__ import annotations
 
@@ -79,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--end")
     bt.add_argument("--point", type=float, default=0.01, help="tick size (XAUUSD: 0.01)")
     bt.add_argument("--out", help="report folder (default reports/backtest_<source>_<time>)")
+    rn = sub.add_parser("run", help="live signal engine: watch MT5, send signals to Telegram (never trades)")
+    rn.add_argument("--dry-run", action="store_true", help="print messages instead of sending to Telegram")
+    rn.add_argument("--once", action="store_true", help="run one cycle and exit")
+    sub.add_parser("news", help="refresh the economic calendar and list upcoming blocks")
+    sub.add_parser("telegram-test", help="send a test message to the Telegram chat in .env")
     db = sub.add_parser("dashboard", help="open the local web dashboard")
     db.add_argument("--port", type=int, default=8501)
     return p
@@ -123,7 +131,8 @@ def dukascopy_dataset(canonical: str) -> str:
 
 
 def _dukascopy(cfg, store: ParquetStore, canonical: str, args: argparse.Namespace,
-               fetch: Callable[[str], bytes] | None = None) -> int:
+               fetch: Callable[[str], bytes] | None = None,
+        fetch_text: Callable[[str], str] | None = None) -> int:
     from pathlib import Path
 
     from .data import dukascopy as dk
@@ -163,9 +172,48 @@ def _backtest(cfg, store: ParquetStore, canonical: str, args: argparse.Namespace
     return 0
 
 
+def _news(cfg, fetch_text, now) -> int:
+    from .features.news import NewsCalendar, refresh_calendar
+    nc = cfg.strategy.news
+    cal = NewsCalendar(refresh_calendar(nc, fetch_text), nc)
+    t = (now or (lambda: pd.Timestamp.now(tz="UTC")))()
+    nxt = [w for w in cal.windows if w.end > t][:15]
+    print(f"{len(cal.windows)} blocking windows for {', '.join(nc.currencies)} in {nc.calendar_file}")
+    for w in nxt:
+        ist = lambda x: x.tz_convert("Asia/Kolkata").strftime("%a %d %b %H:%M")  # noqa: E731
+        print(f"{ist(w.start)} - {ist(w.end)} IST  {w.tier:7s} {w.title}")
+    return 0
+
+
+def _run_engine(cfg, s, args, now, fetch_text) -> int:
+    from .live.engine import SignalEngine
+    from .notify.telegram import ConsoleNotifier, TelegramNotifier
+    notifier = None if args.dry_run else TelegramNotifier.from_env()
+    if notifier is None:
+        print("Dry run: messages are printed here" + ("" if args.dry_run else
+              " (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env to send them to Telegram)"))
+        notifier = ConsoleNotifier(print)
+
+    def balance() -> float | None:
+        info = s.client.call("account_info", allow_none=True)
+        return float(getattr(info, "balance", 0) or 0) or None
+
+    eng = SignalEngine(cfg, s.collector, s.symbol, notifier, balance=balance, now=now, news_fetch=fetch_text)
+    if args.once:
+        print(json.dumps(eng.cycle(), default=str))
+        return 0
+    print(f"Watching {s.symbol.name} on M5 (signals only, never trades). Ctrl+C to stop.")
+    try:
+        eng.run_forever()
+    except KeyboardInterrupt:
+        print("Stopped.")
+    return 0
+
+
 def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
         now: Callable[[], pd.Timestamp] | None = None,
-        fetch: Callable[[str], bytes] | None = None) -> int:
+        fetch: Callable[[str], bytes] | None = None,
+        fetch_text: Callable[[str], str] | None = None) -> int:
     """Entry point used by ``main`` and by tests (with a fake MT5 module)."""
     args = build_parser().parse_args(argv)
     if args.cmd == "dashboard":
@@ -193,6 +241,18 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
         return _dukascopy(cfg, store, canonical, args, fetch)
     if args.cmd == "backtest":
         return _backtest(cfg, store, canonical, args)
+    if args.cmd == "news":
+        return _news(cfg, fetch_text, now)
+    if args.cmd == "telegram-test":
+        from .notify.telegram import TelegramNotifier
+        tg = TelegramNotifier.from_env()
+        if tg is None:
+            print("Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env first.", file=sys.stderr)
+            return 1
+        ok = tg.send("✅ XAUUSD Quant Engine connected. Signals only, no trades are placed.")
+        print("Sent." if ok else "Telegram refused the message (check the token, chat id, and that you "
+              "pressed Start in the bot chat).")
+        return 0 if ok else 1
 
     try:
         with open_session(cfg, mt5_module=mt5_module, now=now) as s:
@@ -226,6 +286,8 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
                 dl = HistoricalDownloader(s.collector, store, canonical, cfg.data)
                 r = dl.download_ticks(start, end)
                 print(f"{r.dataset}: {r.rows_stored} ticks, quality={'OK' if r.quality.ok else 'ISSUES'} {r.quality.counts()}")
+            elif args.cmd == "run":
+                return _run_engine(cfg, s, args, now, fetch_text)
             elif args.cmd == "latest":
                 tf = Timeframe.parse(args.timeframe)
                 print(s.collector.latest_bars(tf, args.count).to_string(index=False))

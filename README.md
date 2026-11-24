@@ -96,6 +96,33 @@ Reports go to `reports/backtest_<source>_<time>/` (`report.md`, `summary.json`, 
 Dukascopy candles are BID only, so the spread is assumed (`backtest.assumed_spread_points`).
 No news filter is applied yet.
 
+## Phases 4-6: live signals, Telegram, news filter
+
+```powershell
+python -m quant_engine telegram-test     # checks TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID from .env
+python -m quant_engine run               # or double-click start_signals.bat
+python -m quant_engine run --dry-run     # print messages here instead of Telegram
+python -m quant_engine news              # refresh the calendar and list upcoming news blocks
+```
+
+* **Live engine** (`live/engine.py`): every 10 s it reads closed candles from MT5. When a new M5
+  candle closes it runs the *same* entry model and risk locks as the backtest, and sends a signal
+  only for that candle (never a stale one, one open signal at a time). Lot size is for 0.5% of the
+  MT5 account balance (`live/sizing.py`, rounded down to the broker's lot step).
+* **Telegram** (`notify/`): the signal (entry, stop, TP1/TP2/TP3, lots, grade, reasons), then follow-ups
+  as replies: filled, TP1 (move stop to breakeven), TP2/TP3, stopped out, expired or cancelled, time
+  stop, session close, and a news warning 10 min before high-impact USD news while a signal is open.
+  A daily summary is sent at 22:30 IST. Follow-ups come from the same `strategy/lifecycle.py` the
+  backtest uses, so live and backtest manage trades identically. They describe what the plan says
+  should happen at the signal's prices; they do not read your account.
+* **News filter** (`features/news.py`): no new signals from 60 min before to 30 min after NFP/CPI/FOMC
+  (FOMC 90 min after), 30/15 min around other high-impact USD news, and all day on US bank holidays.
+  Calendar: the free ForexFactory weekly export, refreshed hourly and cached in `data/news/calendar.csv`.
+  The backtest applies it only for periods the cached calendar covers.
+* **Dashboard**: new **Signals** (sent signals, results, message log), **Backtest** (run and read reports,
+  results by bullish/bearish/neutral market) and **News** tabs.
+* State survives restarts (`data/signals/state.json`); a restart never re-sends a signal.
+
 ## Requirements
 
 * **Windows** PC with the **MetaTrader 5 terminal** installed and logged in to a broker
@@ -183,5 +210,8 @@ dropped connections and failed logins. GitHub Actions runs it on every push.
 
 1. **Phase 1 – data layer** (done)
 2. **Phase 2 – market structure features** (done)
-3. **Phase 3 – entry model, confidence score and backtest** (this)
-4. Later – news calendar filter, risk sizing, Telegram signals and follow-ups
+3. **Phase 3 – entry model, confidence score and backtest** (done)
+4. **Phase 4 – live signal engine and lot sizing** (done)
+5. **Phase 5 – Telegram signals and follow-ups** (done)
+6. **Phase 6 – news filter and dashboard Signals/Backtest/News tabs** (done)
+7. Next – run the backtest on real history, tune the score weights from its results, then other pairs

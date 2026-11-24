@@ -43,6 +43,21 @@ volatility:
   max_spread_ratio: 1.5
   min_stop_spreads: 5.0
 
+news:                        # Strategy Spec v1, "News and volatility filters"
+  enabled: true
+  currencies: [USD]          # XAUUSD reacts to USD news
+  calendar_file: data/news/calendar.csv     # cached calendar (also used by the backtest if it covers the period)
+  feed_url: https://nfs.faireconomy.media/ff_calendar_thisweek.json   # free weekly calendar (ForexFactory export)
+  refresh_minutes: 60
+  tier1_keywords: [Non-Farm, NFP, CPI, FOMC, Federal Funds Rate, Fed Chair, Interest Rate Decision]
+  tier1_before_min: 60       # NFP, CPI, FOMC, rate decisions
+  tier1_after_min: 30
+  fomc_after_min: 90         # GUESS: covers the press conference
+  high_before_min: 30        # other high-impact (red) events
+  high_after_min: 15
+  block_holidays: true       # US bank holidays block the whole New York day
+  alert_before_min: 10       # warn open signals this long before a blocking event
+
 entry:                       # Strategy Spec v1, "Entry, stop loss and take profit"
   min_score: 65              # A grade and above are sent
   a_plus_score: 80

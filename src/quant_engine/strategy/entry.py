@@ -3,8 +3,9 @@
 On every closed M5 candle that completes a change of character (CHoCH), the
 model checks, in order:
 
-1. no signal block (Friday after 10:00 NY, Sunday) and the candle is inside a
-   kill zone or its 30-minute grace period;
+1. no signal block (Friday after 10:00 NY, Sunday), no news blackout (when a
+   calendar is given) and the candle is inside a kill zone or its 30-minute
+   grace period;
 2. H4/H1 bias agrees with the CHoCH direction, and M15 does not oppose it;
 3. a valid liquidity sweep against the trade happened within the last 12 M5
    candles and price has not closed beyond the sweep extreme since;
@@ -38,6 +39,7 @@ from ..config import StrategyConfig
 from ..features import liquidity as liq
 from ..features.context import BEAR, BULL, MarketFeatures
 from ..features.imbalance import order_block
+from ..features.news import NewsCalendar
 from ..features.sessions import KILL_ZONES
 from ..features.volatility import CHAOS, DEAD
 from ..timeframes import Timeframe
@@ -83,8 +85,8 @@ class Signal:
 class EntryModel:
     """Evaluates M5 candles for setups. ``rejections`` counts why candidates failed."""
 
-    def __init__(self, features: MarketFeatures, cfg: StrategyConfig) -> None:
-        self.f, self.cfg = features, cfg
+    def __init__(self, features: MarketFeatures, cfg: StrategyConfig, news: "NewsCalendar | None" = None) -> None:
+        self.f, self.cfg, self.news = features, cfg, news
         self.m5 = features.bars[Timeframe.M5]
         self.o, self.h, self.l, self.c = (self.m5[k].to_numpy(dtype="float64")
                                           for k in ("open", "high", "low", "close"))
@@ -123,6 +125,8 @@ class EntryModel:
             return self._reject("1 signal block (Fri after 10:00 NY / Sunday)")
         if not f.kill_zone_grace[j]:
             return self._reject("1 outside kill zone")
+        if self.news is not None and self.news.blackout(t) is not None:
+            return self._reject("1 news blackout")
         snap = f.snapshot(t)
         if snap.bias != (BULL if d == 1 else BEAR):
             return self._reject("2 HTF bias does not agree")
