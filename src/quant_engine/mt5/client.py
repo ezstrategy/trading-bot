@@ -106,6 +106,9 @@ class MT5Client:
                     "login": getattr(acct, "login", None),
                     "trade_mode": getattr(acct, "trade_mode", None)})
                 return
+            except MT5NotAvailableError:
+                self.connected = False
+                raise  # no point retrying: the package or terminal is missing
             except MT5Error as exc:
                 self.connected = False
                 if exc.code == AUTH_FAILED:

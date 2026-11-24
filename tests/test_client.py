@@ -93,3 +93,17 @@ def test_context_manager_disconnects(fake):
     with c:
         assert fake.initialized
     assert not fake.initialized and not c.connected
+
+
+def test_missing_package_is_not_retried(monkeypatch):
+    import quant_engine.mt5.client as mod
+    from quant_engine.mt5.client import MT5NotAvailableError
+
+    def boom():
+        raise MT5NotAvailableError("not installed")
+    monkeypatch.setattr(mod, "_import_mt5", boom)
+    sleeps = []
+    c = MT5Client(ConnectionConfig(), sleep=sleeps.append)
+    with pytest.raises(MT5NotAvailableError):
+        c.connect()
+    assert sleeps == []
