@@ -4,8 +4,9 @@ A **signals-only** engine for XAUUSD intraday scalping (M5 entries, M15 confirma
 H1/H4 context). It reads market data from MetaTrader 5 and, from Phase 2 on, will post
 trade signals to Telegram. **It never places orders.**
 
-> Status: **Phase 1 – data layer** (MT5 connection, symbol discovery, UTC bars and ticks,
-> data-quality checks, historical downloader, tests). No strategy or signals yet.
+> Status: **Phase 2 – market structure features** on top of the Phase 1 data layer.
+> The engine can describe the market exactly as the strategy spec defines it, with no
+> look-ahead. It does **not** produce trade signals yet (Phase 3).
 
 ## What Phase 1 gives you
 
@@ -20,6 +21,36 @@ trade signals to Telegram. **It never places orders.**
 | Data quality | `src/quant_engine/data/quality.py` | Missing, duplicated, misaligned, invalid OHLC, NaN, spikes; bad ticks |
 | Storage | `src/quant_engine/data/storage.py` | Parquet files under `data/raw/XAUUSD/` (safe to re-download) |
 | Downloader + CLI | `src/quant_engine/data/downloader.py`, `cli.py` | Chunked, resumable history download with a JSON quality report |
+
+## What Phase 2 adds (`src/quant_engine/features/`)
+
+All settings are in `config/strategy.yaml` and follow *XAUUSD & Forex 5-Min Scalping Strategy Spec v1*.
+
+| Feature | Module | Rule |
+|---|---|---|
+| ATR(14) | `atr.py` | Wilder ATR on M5, M15, H1, H4 |
+| Sessions | `sessions.py` | Asia, London and New York kill zones, London close, rollover in **New York time** (DST handled); trading day 17:00–17:00 NY; no new signals Friday after 10:00 NY or on Sunday |
+| Swings | `swings.py` | Confirmed fractals, L=2 on M5 and L=3 on M15/H1/H4; each swing carries the time it became known |
+| Structure | `structure.py` | BOS / CHoCH on closes; state bullish / bearish / ranging per timeframe |
+| Bias | `context.py` | H4/H1 bias table (20/10 points), M15 confirmation gate, H1 premium/discount |
+| Imbalance | `imbalance.py` | Displacement (body ≥ 1.2 ATR and ≥ 60% of range), fair value gaps with size check and invalidation, order blocks |
+| Liquidity | `liquidity.py` | Previous day, Asia, London highs/lows, H1 swings, equal highs/lows, M5 swings; sweeps (1 tick to 1.5 ATR beyond, reclaim within 3 candles, no two closes beyond, in a kill zone) |
+| Filters | `volatility.py` | ATR vs same-time-of-day median (dead < 0.6, chaos > 2.5), spread vs 20-day median |
+| Snapshot | `context.py` | `MarketFeatures(...).snapshot(t)`: everything knowable at time *t* |
+
+**No look-ahead, tested:** `tests/test_context.py` rebuilds every feature on data cut off at
+a decision time and checks the snapshot is identical to the one built from the full history.
+Any feature that peeked at later candles would fail it.
+
+See the context on your own downloaded data:
+
+```powershell
+python -m quant_engine context                       # at the last stored M5 close
+python -m quant_engine context --at "2026-11-24 13:05"
+```
+
+Not in Phase 2: the entry model, confidence score, news calendar, risk sizing and Telegram
+signals (Phase 3 and later).
 
 ## Requirements
 
@@ -106,6 +137,7 @@ dropped connections and failed logins. GitHub Actions runs it on every push.
 
 ## Roadmap
 
-1. **Phase 1 – data layer** (this)
-2. Phase 2 – market structure features (confirmed fractals, ATR, sessions in New York time), awaiting review
-3. Later – strategy rules from the strategy spec, backtests, Telegram signals, news filter
+1. **Phase 1 – data layer** (done)
+2. **Phase 2 – market structure features** (this)
+3. Phase 3 – entry model, confidence score and backtest on real MT5 history
+4. Later – news calendar filter, risk sizing, Telegram signals and follow-ups
