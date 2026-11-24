@@ -1,0 +1,18 @@
+# Core engine settings. Values here are defaults; secrets come from .env.
+instrument: XAUUSD
+style: intraday_scalping
+execution_mode: signals_only      # the only allowed value; live trading is not supported
+
+timeframes:
+  entry: M5
+  confirmation: M15
+  context: [H1, H4]
+  collect: [M1, M5, M15, H1, H4]  # everything the data layer downloads
+
+risk:
+  per_trade_pct: 0.5              # used by later phases for position sizing in signals
+
+logging:
+  level: INFO
+  json: true                      # structured JSON lines
+  file: logs/engine.log

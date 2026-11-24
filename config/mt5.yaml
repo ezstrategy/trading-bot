@@ -1,0 +1,22 @@
+# MetaTrader 5 connection. Login, password, server and path come from .env.
+connection:
+  timeout_ms: 60000
+  max_retries: 5
+  retry_backoff_seconds: 2.0      # doubles after each failed attempt
+  retry_backoff_max_seconds: 60.0
+
+# MT5 returns candle and tick times in the BROKER SERVER clock, not UTC.
+# How to convert them to UTC:
+#   auto      -> measure the offset from the latest tick vs real UTC (needs an open market),
+#                and use `fallback_mode` when the market is closed
+#   ny_close  -> server midnight = 17:00 New York (GMT+2 winter / GMT+3 summer, follows US DST).
+#                This is what most retail FX/CFD brokers use.
+#   fixed     -> fixed_offset_hours all year
+#   timezone  -> any IANA zone, e.g. "Europe/London"
+server_time:
+  mode: auto
+  fallback_mode: ny_close
+  fixed_offset_hours: 2
+  timezone: Etc/UTC
+  auto_round_minutes: 30          # detected offset is rounded to this step
+  auto_max_tick_age_seconds: 120  # a tick older than this is too stale to measure from
