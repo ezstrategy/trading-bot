@@ -71,6 +71,31 @@ It opens at http://localhost:8501 (only reachable from your own PC) and gives yo
 * **Review a past moment**: see exactly what was known at any earlier time (no look-ahead).
 * **Data quality** table for every stored timeframe.
 
+## Phase 3: entry model and backtest (`src/quant_engine/strategy/`)
+
+* `entry.py`: on each closed M5 candle that makes a CHoCH, runs the Strategy Spec v1 gates
+  (kill zone, H4/H1 bias + M15, liquidity sweep, displacement + FVG, discount/premium entry,
+  volatility/spread, stop 0.5-2.5 ATR, TP2 >= 2R) and scores the setup 0-100 (A+ / A / B).
+  Every rejected candle is counted by reason (the "signal funnel").
+* `backtest.py`: simulates the limit order on BID candles with the spread paid on every trade,
+  stop checked before targets, TP1 50% + breakeven, TP2/TP3, 30-minute expiry, 2-hour time stop,
+  session close, and the risk locks (daily -2%, weekly -5%, 2 losses in a row, 2 signals per session).
+* `regime.py`: labels each trade's market as **bullish / bearish / neutral** (H4 close vs EMA50
+  and the EMA's slope), independent of the strategy's own structure reading.
+* `report.py` / `runner.py`: results overall and by regime, H4 structure, grade, side, kill zone and month.
+
+Free real history without MT5 (Dukascopy spot gold, UTC):
+
+```powershell
+python -m quant_engine dukascopy --days 180         # resumes; stores XAUUSD_DUKASCOPY bars
+python -m quant_engine backtest --source dukascopy  # or double-click start_backtest.bat
+python -m quant_engine backtest                     # on your MT5 bars from 'download'
+```
+
+Reports go to `reports/backtest_<source>_<time>/` (`report.md`, `summary.json`, `trades.csv`).
+Dukascopy candles are BID only, so the spread is assumed (`backtest.assumed_spread_points`).
+No news filter is applied yet.
+
 ## Requirements
 
 * **Windows** PC with the **MetaTrader 5 terminal** installed and logged in to a broker
@@ -157,6 +182,6 @@ dropped connections and failed logins. GitHub Actions runs it on every push.
 ## Roadmap
 
 1. **Phase 1 – data layer** (done)
-2. **Phase 2 – market structure features** (this)
-3. Phase 3 – entry model, confidence score and backtest on real MT5 history
+2. **Phase 2 – market structure features** (done)
+3. **Phase 3 – entry model, confidence score and backtest** (this)
 4. Later – news calendar filter, risk sizing, Telegram signals and follow-ups

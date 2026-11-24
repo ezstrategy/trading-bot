@@ -42,3 +42,32 @@ volatility:
   chaos_ratio: 2.5
   max_spread_ratio: 1.5
   min_stop_spreads: 5.0
+
+entry:                       # Strategy Spec v1, "Entry, stop loss and take profit"
+  min_score: 65              # A grade and above are sent
+  a_plus_score: 80
+  b_grade_score: 50          # 50-64 = grade B: logged, never sent
+  sl_buffer_atr: 0.1         # buffer = max(0.1 x ATR(14, M5), 2 x spread)
+  sl_buffer_spreads: 2.0
+  min_stop_atr: 0.5
+  max_stop_atr: 2.5
+  tp1_min_r: 1.0
+  tp2_min_r: 2.0
+  tp3_min_r: 3.0
+  expiry_candles: 6          # limit order lifetime (30 min)
+  time_stop_candles: 24      # close at market if no TP1 / SL within 2 hours of the fill
+  session_close_hours: 2     # close anything still open 2h after its kill zone ends
+  preferred_kill_zone: newyork_kz   # session-fit points for XAUUSD
+
+backtest:
+  assumed_spread_points: 30  # used when the data has no spread (0.30 USD on XAUUSD)
+  risk_pct: 0.5
+  daily_loss_lock_pct: 2.0
+  weekly_loss_lock_pct: 5.0
+  max_losses_in_row: 2       # per day
+  max_signals_per_session: 2
+  # Market regime label for the report (H4): bullish/bearish when the close is on that side
+  # of EMA(period) and the EMA moved >= min_slope_atr x ATR(14) over slope_bars; else neutral.
+  regime_ema_period: 50
+  regime_slope_bars: 10
+  regime_min_slope_atr: 0.5   # GUESS
