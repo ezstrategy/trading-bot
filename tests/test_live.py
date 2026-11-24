@@ -6,7 +6,14 @@ import pandas as pd
 import pytest
 
 from quant_engine.config import NewsConfig, load_config
-from quant_engine.features.news import HIGH, HOLIDAY, TIER1, NewsCalendar, parse_ff_json, refresh_calendar
+from quant_engine.features.news import (
+    HIGH,
+    HOLIDAY,
+    TIER1,
+    NewsCalendar,
+    parse_ff_json,
+    refresh_calendar,
+)
 from quant_engine.live.engine import SignalEngine
 from quant_engine.live.sizing import lot_size
 from quant_engine.live.state import CLOSED, EngineState, read_messages
@@ -96,11 +103,12 @@ def replay_bars():
     return synthetic_bars(days=45, seed=6)
 
 
-def _engine(tmp_path, bars, start, news=False, notifier=None):
+def _engine(tmp_path, bars, start, news=False, notifier=None, mode="v1"):
     cfg = load_config("config", load_env_file=False)
     cfg.engine.live.state_dir = str(tmp_path / "signals")
     cfg.engine.live.lookback_days = {"M5": 12, "M15": 12, "H1": 28, "H4": 28}
     cfg.strategy.news.enabled = news
+    cfg.strategy.mode = mode
     cfg.strategy.news.calendar_file = str(tmp_path / "cal.csv")
     clk = Clock(start)
     rec = notifier or Recorder()

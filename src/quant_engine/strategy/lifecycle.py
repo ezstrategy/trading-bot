@@ -140,10 +140,10 @@ def simulate(s: Signal, t: pd.DatetimeIndex, h: np.ndarray, l: np.ndarray, c: np
             nxt += 1
         if nxt == len(targets):
             return TradeResult(f"TP{len(targets)} hit", True, fill, k, realised, False, events)
-        if nxt == 0 and k - fill >= e.time_stop_candles:
+        if nxt == 0 and k - fill >= (s.time_stop_candles or e.time_stop_candles):
             r = realised + size * s.r_multiple(exit_px(k))
             ev(k, TIME_STOP, exit_px(k), r)
-            return TradeResult("time stop (2h without TP1)", True, fill, k, r, False, events)
+            return TradeResult("time stop (no TP1 in time)", True, fill, k, r, False, events)
         if close_time(k) >= session_end:
             r = realised + size * s.r_multiple(exit_px(k))
             ev(k, SESSION_END, exit_px(k), r)

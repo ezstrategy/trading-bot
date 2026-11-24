@@ -164,7 +164,7 @@ def test_report_stats_and_markdown():
 @pytest.fixture(scope="module")
 def synth():
     bars = synthetic_bars(days=45, seed=6)
-    cfg = StrategyConfig()
+    cfg = StrategyConfig(mode="v1")
     bt = Backtester(MarketFeatures(bars, cfg, point=0.01), cfg)
     return bars, cfg, bt, bt.run()
 

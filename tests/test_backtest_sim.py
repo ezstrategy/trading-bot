@@ -36,7 +36,7 @@ def test_buy_limit_fills_on_ask_then_stop_loss():
 def test_fill_candle_checks_only_the_stop():
     # the fill candle also trades above TP1: ignored, only its stop is checked
     out = sim([FAR, (102.5, 99.0, 101.0), (101.5, 100.5, 101.0)] + [(101.2, 100.6, 101.0)] * 30)
-    assert out[0] == "time stop (2h without TP1)" and out[2] == 1
+    assert out[0] == "time stop (no TP1 in time)" and out[2] == 1
     assert sim([FAR, (102.5, 97.5, 101.0)]) == ("stop loss", True, 1, 1, -1.0)
 
 
@@ -96,7 +96,7 @@ def test_time_stop_after_24_candles_without_tp1():
     cfg.entry.session_close_hours = 24.0          # keep the session close out of the way
     bars = [FAR, (100.2, 99.6, 100.1)] + [(100.8, 99.9, 100.5)] * 40
     out = sim(bars, cfg=cfg)
-    assert out[0] == "time stop (2h without TP1)" and out[3] == 1 + 24
+    assert out[0] == "time stop (no TP1 in time)" and out[3] == 1 + 24
     assert out[4] == pytest.approx(0.5 / 2.0)    # closed at 100.5 bid, entry 100, risk 2
 
 

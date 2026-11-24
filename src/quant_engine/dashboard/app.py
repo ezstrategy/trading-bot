@@ -213,12 +213,17 @@ def render_signals() -> None:
 
 def render_backtest() -> None:
     st.caption("Results come only from a reproducible run on stored data. Fewer than 30 trades says little.")
-    c1, c2 = st.columns([2, 1])
+    c1, c2, c3 = st.columns([2, 2, 1])
     source = c1.radio("Data", ["dukascopy", "mt5"], horizontal=True,
                       format_func=lambda s: "Dukascopy (free history)" if s == "dukascopy" else "MT5 (downloaded)",
                       help="Get Dukascopy data with: python -m quant_engine dukascopy --days 180")
-    if c2.button("Run backtest", width="stretch"):
-        out = mt5_action("Running backtest", services.run_backtest_now, cfg, store, source, float(ss["point"]))
+    modes = ["regime", "compare", "bullish", "bearish", "sideways", "v1"]
+    mode_names = {"regime": "3-mode switch (by market)", "compare": "Compare all modes x markets",
+                  "bullish": "Bullish: buy the dip", "bearish": "Bearish: sell the rally",
+                  "sideways": "Sideways: fade the range", "v1": "v1: sweep reversal"}
+    mode = c2.selectbox("Strategy", modes, format_func=mode_names.get)
+    if c3.button("Run backtest", width="stretch"):
+        out = mt5_action("Running backtest", services.run_backtest_now, cfg, store, source, float(ss["point"]), mode)
         if out:
             st.success(f"Saved to {out}")
     if ss.get("last_error"):
@@ -229,6 +234,10 @@ def render_backtest() -> None:
         return
     pick = st.selectbox("Report", reports, format_func=lambda p: p.name)
     summary = json.loads((pick / "summary.json").read_text())
+    if "comparison" in summary:
+        st.markdown("**Every mode in every market** (each single mode should do best in its own market)")
+        st.dataframe(pd.DataFrame(summary["comparison"]), hide_index=True, width="stretch")
+        return
     overall = summary["overall"]
     cols = st.columns(5)
     for col, (k, label) in zip(cols, [("trades", "Trades"), ("win_rate_pct", "Win rate %"), ("total_r", "Total R"),

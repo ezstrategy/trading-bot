@@ -10,6 +10,8 @@ from ..strategy.entry import Signal
 
 IST = "Asia/Kolkata"
 KZ_NAME = {"london_kz": "London", "newyork_kz": "New York"}
+MODE_NAME = {"bullish": "Uptrend · buy the dip", "bearish": "Downtrend · sell the rally",
+             "sideways": "Range · fade the false breakout", "v1": "Sweep reversal"}
 
 
 def _px(x: float | None, digits: int) -> str:
@@ -28,6 +30,7 @@ def signal_text(s: Signal, symbol: str, lots: float, risk_pct: float, digits: in
     local = s.time.tz_convert(IST)
     lines = [
         f"{head} {html.escape(symbol)}  ·  Grade {s.grade} ({s.score}/100)",
+        f"<i>{MODE_NAME.get(s.strategy, s.strategy)}</i>",
         "",
         f"<b>Entry:</b> {p(s.entry)}",
         f"<b>Stop loss:</b> {p(s.stop_loss)}  ({s.risk:.2f} = 1R)",
@@ -56,7 +59,8 @@ def event_text(ev: lc.TradeEvent, s: Signal, digits: int = 2) -> str:
         lc.TP3: f"🏁 TP3 hit (+{s.r_multiple(s.tp3):.1f}R). Trade closed" if s.tp3 is not None else "TP3 hit",
         lc.STOP: "❌ Stopped out (−1R)",
         lc.BREAKEVEN: f"➖ Closed at breakeven after TP1 (total {ev.r:+.2f}R)",
-        lc.TIME_STOP: f"⏱ Close at market ({p(ev.price)}): 2 hours without TP1 ({ev.r:+.2f}R)",
+        lc.TIME_STOP: f"⏱ Close at market ({p(ev.price)}): {(s.time_stop_candles or 24) * 5} min without TP1 "
+                      f"({ev.r:+.2f}R)",
         lc.SESSION_END: f"🔔 Session over: close at market ({p(ev.price)}), {ev.r:+.2f}R",
         lc.EXPIRED: "⌛ Cancelled: not filled within 30 min",
         lc.CANCEL_TP1: "🚫 Cancelled: price reached TP1 before the entry filled",
