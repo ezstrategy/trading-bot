@@ -8,6 +8,8 @@
     python -m quant_engine latest --timeframe M5 [--count 10]
     python -m quant_engine context [--at "2026-11-24 13:05"] [--point 0.01]
     python -m quant_engine dashboard [--port 8501]
+    python -m quant_engine dukascopy --start 2026-05-01 [--end 2026-11-24]   (free history, no MT5)
+    python -m quant_engine backtest [--source mt5|dukascopy] [--start ...] [--end ...]
 """
 from __future__ import annotations
 
@@ -66,6 +68,17 @@ def build_parser() -> argparse.ArgumentParser:
     cx = sub.add_parser("context", help="market-structure snapshot from stored data (no MT5 needed)")
     cx.add_argument("--at", help="UTC decision time (default: last stored M5 close)")
     cx.add_argument("--point", type=float, default=0.01, help="tick size of your broker symbol")
+    dk = sub.add_parser("dukascopy", help="download free Dukascopy M1 history and build M5-H4 bars")
+    dk.add_argument("--start")
+    dk.add_argument("--end")
+    dk.add_argument("--days", type=int)
+    bt = sub.add_parser("backtest", help="backtest the entry model on stored bars (no MT5 needed)")
+    bt.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5",
+                    help="mt5 = bars from 'download'; dukascopy = bars from 'dukascopy'")
+    bt.add_argument("--start")
+    bt.add_argument("--end")
+    bt.add_argument("--point", type=float, default=0.01, help="tick size (XAUUSD: 0.01)")
+    bt.add_argument("--out", help="report folder (default reports/backtest_<source>_<time>)")
     db = sub.add_parser("dashboard", help="open the local web dashboard")
     db.add_argument("--port", type=int, default=8501)
     return p
@@ -104,8 +117,55 @@ def _context(cfg, store: ParquetStore, canonical: str, at: str | None, point: fl
     return 0
 
 
+def dukascopy_dataset(canonical: str) -> str:
+    """Stored instrument name for Dukascopy bars (kept apart from broker data)."""
+    return f"{canonical}_DUKASCOPY"
+
+
+def _dukascopy(cfg, store: ParquetStore, canonical: str, args: argparse.Namespace,
+               fetch: Callable[[str], bytes] | None = None) -> int:
+    from pathlib import Path
+
+    from .data import dukascopy as dk
+    from .features.context import STRUCTURE_TFS
+    start, end = _range(args, 180)
+    folder = Path(cfg.data.storage.root) / "dukascopy" / canonical
+    counts = dk.download_days(canonical, start.date(), end.date(), folder, fetch=fetch)
+    print(f"Dukascopy {canonical}: {counts} -> {folder}")
+    m1 = dk.load_folder(folder, assumed_spread_points=cfg.strategy.backtest.assumed_spread_points)
+    if m1.empty:
+        print("No candles downloaded.", file=sys.stderr)
+        return 1
+    ds = dukascopy_dataset(canonical)
+    for tf in STRUCTURE_TFS:
+        n = store.write_bars(ds, tf, dk.resample(m1, tf))
+        print(f"{ds} {tf.value}: {n} bars stored")
+    return 0 if counts["failed"] == 0 else 1
+
+
+def _backtest(cfg, store: ParquetStore, canonical: str, args: argparse.Namespace) -> int:
+    from .strategy.runner import run_backtest
+    ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+    note = ("Dukascopy XAU/USD spot, BID M1 candles (UTC), resampled to M5/M15/H1/H4; spread assumed"
+            if args.source == "dukascopy" else f"MT5 broker bars for {canonical} (UTC)")
+    start = pd.Timestamp(args.start, tz="UTC") if args.start else None
+    end = pd.Timestamp(args.end, tz="UTC") if args.end else None
+    out = args.out or f"reports/backtest_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+    try:
+        summary = run_backtest(cfg, store, ds, args.point, out, start, end, note)
+    except ValueError as exc:
+        hint = "python -m quant_engine dukascopy --days 180" if args.source == "dukascopy" \
+            else "python -m quant_engine download"
+        print(f"{exc}. Run: {hint}", file=sys.stderr)
+        return 1
+    print(json.dumps(summary["overall"], indent=2))
+    print(f"Report: {out}/report.md  Trades: {out}/trades.csv")
+    return 0
+
+
 def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
-        now: Callable[[], pd.Timestamp] | None = None) -> int:
+        now: Callable[[], pd.Timestamp] | None = None,
+        fetch: Callable[[str], bytes] | None = None) -> int:
     """Entry point used by ``main`` and by tests (with a fake MT5 module)."""
     args = build_parser().parse_args(argv)
     if args.cmd == "dashboard":
@@ -129,6 +189,10 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
         return 0 if all(r.ok for r in reports) else 1
     if args.cmd == "context":
         return _context(cfg, store, canonical, args.at, args.point)
+    if args.cmd == "dukascopy":
+        return _dukascopy(cfg, store, canonical, args, fetch)
+    if args.cmd == "backtest":
+        return _backtest(cfg, store, canonical, args)
 
     try:
         with open_session(cfg, mt5_module=mt5_module, now=now) as s:

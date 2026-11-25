@@ -242,6 +242,35 @@ class VolatilityConfig(BaseModel):
     min_stop_spreads: float = Field(5.0, ge=0)
 
 
+class EntryConfig(BaseModel):
+    min_score: int = Field(65, ge=0, le=100)
+    a_plus_score: int = Field(80, ge=0, le=100)
+    b_grade_score: int = Field(50, ge=0, le=100)
+    sl_buffer_atr: float = Field(0.1, ge=0)
+    sl_buffer_spreads: float = Field(2.0, ge=0)
+    min_stop_atr: float = Field(0.5, gt=0)
+    max_stop_atr: float = Field(2.5, gt=0)
+    tp1_min_r: float = Field(1.0, gt=0)
+    tp2_min_r: float = Field(2.0, gt=0)
+    tp3_min_r: float = Field(3.0, gt=0)
+    expiry_candles: int = Field(6, ge=1)
+    time_stop_candles: int = Field(24, ge=1)
+    session_close_hours: float = Field(2.0, ge=0)
+    preferred_kill_zone: Literal["london_kz", "newyork_kz"] = "newyork_kz"
+
+
+class BacktestConfig(BaseModel):
+    assumed_spread_points: float = Field(30.0, ge=0)
+    risk_pct: float = Field(0.5, gt=0, le=5)
+    daily_loss_lock_pct: float = Field(2.0, gt=0)
+    weekly_loss_lock_pct: float = Field(5.0, gt=0)
+    max_losses_in_row: int = Field(2, ge=1)
+    max_signals_per_session: int = Field(2, ge=1)
+    regime_ema_period: int = Field(50, ge=2)
+    regime_slope_bars: int = Field(10, ge=1)
+    regime_min_slope_atr: float = Field(0.5, ge=0)
+
+
 class StrategyConfig(BaseModel):
     atr_period: int = Field(14, ge=1)
     swings: dict[Timeframe, int] = Field(default_factory=lambda: {
@@ -252,6 +281,8 @@ class StrategyConfig(BaseModel):
     liquidity: LiquidityConfig = Field(default_factory=LiquidityConfig)
     sessions: SessionsConfig = Field(default_factory=SessionsConfig)
     volatility: VolatilityConfig = Field(default_factory=VolatilityConfig)
+    entry: EntryConfig = Field(default_factory=EntryConfig)
+    backtest: BacktestConfig = Field(default_factory=BacktestConfig)
 
     @field_validator("swings", mode="before")
     @classmethod
