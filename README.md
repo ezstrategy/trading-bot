@@ -52,6 +52,25 @@ python -m quant_engine context --at "2026-11-24 13:05"
 Not in Phase 2: the entry model, confidence score, news calendar, risk sizing and Telegram
 signals (Phase 3 and later).
 
+## Dashboard
+
+A simple local web page to operate the engine (signals only, it cannot trade):
+
+```powershell
+python -m quant_engine dashboard        # or double-click start_dashboard.bat
+```
+
+It opens at http://localhost:8501 (only reachable from your own PC) and gives you:
+
+* **Check MT5 connection**: broker symbol, server-time offset, last tick in UTC.
+* **Download history**: pick days and timeframes; the download resumes where it stopped.
+* **Live mode**: auto-refresh from MT5 every 30 s to 5 min.
+* **Market context**: H4/H1 bias, structure on every timeframe, session, signal block, volatility.
+* **Chart**: XAUUSD candles (M5, M15, H1, H4) with kill zones, liquidity levels, fair value gaps,
+  sweeps, BOS/CHoCH and the H1 equilibrium. Times in IST, UTC or New York time.
+* **Review a past moment**: see exactly what was known at any earlier time (no look-ahead).
+* **Data quality** table for every stored timeframe.
+
 ## Requirements
 
 * **Windows** PC with the **MetaTrader 5 terminal** installed and logged in to a broker

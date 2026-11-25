@@ -7,6 +7,7 @@
     python -m quant_engine validate [--timeframes M5]
     python -m quant_engine latest --timeframe M5 [--count 10]
     python -m quant_engine context [--at "2026-11-24 13:05"] [--point 0.01]
+    python -m quant_engine dashboard [--port 8501]
 """
 from __future__ import annotations
 
@@ -65,7 +66,27 @@ def build_parser() -> argparse.ArgumentParser:
     cx = sub.add_parser("context", help="market-structure snapshot from stored data (no MT5 needed)")
     cx.add_argument("--at", help="UTC decision time (default: last stored M5 close)")
     cx.add_argument("--point", type=float, default=0.01, help="tick size of your broker symbol")
+    db = sub.add_parser("dashboard", help="open the local web dashboard")
+    db.add_argument("--port", type=int, default=8501)
     return p
+
+
+def _dashboard(config_dir: str | None, port: int) -> int:
+    """Launch Streamlit on localhost only."""
+    import os
+    import subprocess
+    from pathlib import Path
+    app = Path(__file__).resolve().parent / "dashboard" / "app.py"
+    env = dict(os.environ)
+    if config_dir:
+        env["QE_CONFIG_DIR"] = config_dir
+    src = str(Path(__file__).resolve().parents[1])
+    env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
+    cmd = [sys.executable, "-m", "streamlit", "run", str(app), "--server.address", "localhost",
+           "--server.port", str(port), "--browser.gatherUsageStats", "false",
+           "--client.toolbarMode", "minimal"]
+    print(f"Dashboard: http://localhost:{port}  (Ctrl+C to stop)")
+    return subprocess.call(cmd, env=env)
 
 
 def _context(cfg, store: ParquetStore, canonical: str, at: str | None, point: float) -> int:
@@ -78,23 +99,8 @@ def _context(cfg, store: ParquetStore, canonical: str, at: str | None, point: fl
     m5 = bars[Timeframe.M5]
     t = pd.Timestamp(at, tz="UTC") if at else m5["time"].iat[-1] + Timeframe.M5.delta
     s = MarketFeatures(bars, cfg.strategy, point).snapshot(t)
-    dr = s.dealing_range
-    print(json.dumps({
-        "decision_time_utc": str(s.decision_time),
-        "last_m5_close": float(s.m5_bar["close"]),
-        "structure": {tf.value: st for tf, st in s.state.items()},
-        "bias": s.bias, "htf_points": s.htf_points,
-        "m15_allows": {"long": s.m15_allows_long, "short": s.m15_allows_short},
-        "session": s.session, "in_kill_zone": s.in_kill_zone, "new_signals_blocked": s.new_signals_blocked,
-        "atr": {tf.value: round(v, 3) for tf, v in s.atr.items()},
-        "h1_dealing_range": None if dr is None else {"low": dr.low, "high": dr.high, "eq": dr.equilibrium},
-        "volatility": {"ratio": round(s.vol_ratio, 2), "regime": s.vol_regime},
-        "pools": [{"kind": p.kind, "side": p.side, "price": round(p.price, 2)} for p in s.pools.itertuples()],
-        "recent_sweeps": [{"pool": w.pool_kind, "side": w.side, "level": round(w.level, 2),
-                           "time": str(w.sweep_time)} for w in s.recent_sweeps],
-        "recent_m5_breaks": [{"kind": e.kind, "dir": int(e.direction), "level": round(e.level, 2),
-                              "time": str(e.time)} for e in s.m5_events.itertuples()],
-    }, indent=2, default=str))
+    from .dashboard.services import snapshot_summary
+    print(json.dumps(snapshot_summary(s), indent=2, default=str))
     return 0
 
 
@@ -102,6 +108,8 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
         now: Callable[[], pd.Timestamp] | None = None) -> int:
     """Entry point used by ``main`` and by tests (with a fake MT5 module)."""
     args = build_parser().parse_args(argv)
+    if args.cmd == "dashboard":
+        return _dashboard(args.config, args.port)
     try:
         cfg = load_config(args.config)
     except ConfigError as exc:
