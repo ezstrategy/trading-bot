@@ -10,6 +10,7 @@
     python -m quant_engine dashboard [--port 8501]
     python -m quant_engine dukascopy --start 2026-05-01 [--end 2026-11-24]   (free history, no MT5)
     python -m quant_engine backtest [--source mt5|dukascopy] [--mode regime|v1|bullish|bearish|sideways|compare]
+    python -m quant_engine patterns [--source mt5|dukascopy]   (find repeatable patterns per market type)
     python -m quant_engine run [--dry-run] [--once]      (live signals to Telegram; never trades)
     python -m quant_engine news                           (refresh the economic calendar, show blocks)
     python -m quant_engine telegram-test                  (send a test message)
@@ -81,9 +82,15 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--start")
     bt.add_argument("--end")
     bt.add_argument("--point", type=float, default=0.01, help="tick size (XAUUSD: 0.01)")
-    bt.add_argument("--mode", choices=["regime", "v1", "bullish", "bearish", "sideways", "compare"],
+    bt.add_argument("--mode", choices=["regime", "v1", "bullish", "bearish", "sideways", "patterns", "compare"],
                     help="strategy to test (default: strategy.mode in config); compare = all modes x markets")
     bt.add_argument("--out", help="report folder (default reports/backtest_<source>_<time>)")
+    pt = sub.add_parser("patterns", help="find repeatable patterns per market type and test them on unseen data")
+    pt.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    pt.add_argument("--start")
+    pt.add_argument("--end")
+    pt.add_argument("--point", type=float, default=0.01, help="tick size (XAUUSD: 0.01)")
+    pt.add_argument("--out", help="report folder (default reports/patterns_<source>_<time>)")
     rn = sub.add_parser("run", help="live signal engine: watch MT5, send signals to Telegram (never trades)")
     rn.add_argument("--dry-run", action="store_true", help="print messages instead of sending to Telegram")
     rn.add_argument("--once", action="store_true", help="run one cycle and exit")
@@ -175,6 +182,26 @@ def _backtest(cfg, store: ParquetStore, canonical: str, args: argparse.Namespace
     return 0
 
 
+def _patterns(cfg, store: ParquetStore, canonical: str, args: argparse.Namespace) -> int:
+    from .research.runner import run_patterns
+    ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+    note = ("Dukascopy XAU/USD spot, BID M1 candles (UTC), resampled; spread assumed"
+            if args.source == "dukascopy" else f"MT5 broker bars for {canonical} (UTC)")
+    start = pd.Timestamp(args.start, tz="UTC") if args.start else None
+    end = pd.Timestamp(args.end, tz="UTC") if args.end else None
+    out = args.out or f"reports/patterns_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+    try:
+        summary = run_patterns(cfg, store, ds, args.point, out, start, end, note)
+    except ValueError as exc:
+        hint = "python -m quant_engine dukascopy --days 365" if args.source == "dukascopy" \
+            else "python -m quant_engine download --days 365"
+        print(f"{exc}. Run: {hint}", file=sys.stderr)
+        return 1
+    print(json.dumps(summary, indent=2, default=str))
+    print(f"Report: {out}/report.md")
+    return 0
+
+
 def _news(cfg, fetch_text, now) -> int:
     from .features.news import NewsCalendar, refresh_calendar
     nc = cfg.strategy.news
@@ -244,6 +271,8 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
         return _dukascopy(cfg, store, canonical, args, fetch)
     if args.cmd == "backtest":
         return _backtest(cfg, store, canonical, args)
+    if args.cmd == "patterns":
+        return _patterns(cfg, store, canonical, args)
     if args.cmd == "news":
         return _news(cfg, fetch_text, now)
     if args.cmd == "telegram-test":

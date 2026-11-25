@@ -438,5 +438,9 @@ def build_model(mode: str, features: MarketFeatures, cfg: StrategyConfig, news: 
         return EntryModel(features, cfg, news)
     if mode == "regime":
         return RegimeModel(features, cfg, news)
+    if mode == "patterns":
+        from ..research.model import PatternModel, load_patterns
+        pats = load_patterns(cfg.research.patterns_file, cfg.research.use_verdicts)
+        return PatternModel(features, cfg, news, patterns=pats)
     cls = {"bullish": BullishTrendModel, "bearish": BearishRallyModel, "sideways": RangeFadeModel}[mode]
     return cls(features, cfg, news, require_regime=require_regime)

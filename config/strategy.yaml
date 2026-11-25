@@ -116,3 +116,30 @@ backtest:
   regime_ema_period: 50
   regime_slope_bars: 10
   regime_min_slope_atr: 0.5   # GUESS
+
+# Pattern mining: python -m quant_engine patterns (or find_patterns.bat).
+# Looks for repeatable moves per H4 market (bullish / bearish / neutral) on the OLDER part of the
+# history, then checks each one on the NEWER part it never saw. Distances are M5 ATR(14).
+research:
+  discover_frac: 0.6         # older 60% = discovery, newer 40% = held-out check
+  sl_atr: [1.0]              # stop distance tested
+  tp_atr: [1.0, 2.0]         # target distances tested
+  horizons: [12, 36]         # give up after 1 h / 3 h (M5 candles)
+  sweep_lookbacks: [24, 72]  # liquidity sweep of the last 2 h / 6 h high or low
+  impulse_body_atr: 1.5      # impulse candle: body >= 1.5 ATR ...
+  impulse_body_ratio: 0.6    # ... and >= 60% of the candle
+  move_bars: 12              # big move: >= 3 ATR in 1 hour
+  move_atr: 3.0
+  range_bars: 48             # range edge: last 4 h range, 3-10 ATR wide, touch within 10% of an edge
+  range_min_atr: 3.0
+  range_max_atr: 10.0
+  range_edge: 0.1
+  min_trades_discover: 30    # fewer trades than this = not tested
+  min_trades_validate: 15
+  fdr_q: 0.10                # false discovery rate for the many patterns tested (Benjamini-Hochberg)
+  min_avg_r: 0.05            # must beat costs by at least 0.05 R per trade
+  min_stable_thirds: 2       # positive in at least 2 of the 3 thirds of the discovery period
+  validate_p: 0.05           # held-out check (Bonferroni-corrected over the patterns found)
+  max_patterns: 20
+  use_verdicts: [confirmed]  # which patterns `mode: patterns` may signal from
+  patterns_file: reports/patterns_latest.json

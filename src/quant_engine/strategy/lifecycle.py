@@ -13,7 +13,8 @@ signal is managed identically in both. Rules (conservative on purpose):
 * TP1 closes 50% and moves the stop to entry + spread. With a TP3, 25% closes
   at TP2 and 25% at TP3; otherwise the other 50% closes at TP2.
 * Time stop: no TP1 within ``time_stop_candles`` after the fill -> close.
-  Session end: anything open ``session_close_hours`` after the kill zone ends is closed.
+  Session end: anything open ``session_close_hours`` after the kill zone ends is closed
+  (or at ``Signal.close_by`` when the model sets one).
 """
 from __future__ import annotations
 
@@ -103,7 +104,8 @@ def simulate(s: Signal, t: pd.DatetimeIndex, h: np.ndarray, l: np.ndarray, c: np
     # ---- position
     ev(fill, FILLED, s.entry, 0.0)
     stop, size, realised = s.stop_loss, 1.0, 0.0
-    session_end = kill_zone_end(s.time, s.kill_zone, cfg) + pd.Timedelta(hours=e.session_close_hours)
+    session_end = (s.close_by if s.close_by is not None
+                   else kill_zone_end(s.time, s.kill_zone, cfg) + pd.Timedelta(hours=e.session_close_hours))
     targets = [(s.tp1, 0.5, TP1)] + ([(s.tp2, 0.25, TP2), (s.tp3, 0.25, TP3)] if s.tp3 is not None
                                      else [(s.tp2, 0.5, TP2)])
 

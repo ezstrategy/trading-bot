@@ -111,6 +111,27 @@ Test them: `python -m quant_engine backtest --mode compare` runs every mode in e
 (`comparison.md`), so you can check each one really does best in its own market. Settings: `modes:` in
 `config/strategy.yaml`. `mode: v1` switches back to the original sweep-reversal model.
 
+## Pattern research (`src/quant_engine/research/`)
+
+Looks for repeatable gold moves in each H4 market type (bullish / bearish / neutral)
+instead of hand-written rules. Double-click **find_patterns.bat** (MT5 open), or:
+
+```
+python -m quant_engine download --days 365
+python -m quant_engine patterns --source mt5      # report in reports/patterns_mt5_<time>/report.md
+```
+
+- Candidates: time of day, liquidity sweeps of the last 2 h / 6 h / previous day, closed
+  breakouts, impulse candles, big 1-hour moves and range-edge touches, each x market type x
+  session x BUY/SELL x exit rule (stop, target and time limit in M5 ATR). Settings: `research:`
+  in `config/strategy.yaml`.
+- Found on the older 60% of the history only, with a Benjamini-Hochberg false-discovery
+  filter across all candidates, a minimum edge after spread and a stability check.
+- Checked on the newer 40% it never saw: `confirmed`, `held up (not proven)`, `failed`.
+  All discovery survivors also run through the normal backtester on that unseen period.
+- Surviving patterns are saved to `reports/patterns_latest.json`; `strategy.mode: patterns`
+  (or `backtest --mode patterns`) signals from the `confirmed` ones. Signals only.
+
 ## Phases 4-6: live signals, Telegram, news filter
 
 ```powershell
