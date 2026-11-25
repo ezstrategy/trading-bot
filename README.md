@@ -107,6 +107,10 @@ and uses that market's own strategy. Each one has its own setup, trigger, entry,
 | Bearish | **Sell the rally** | Gold sell-offs are fast; counter-trend rallies are weak and usually raid buy stops before rolling over | Rally into the H1 premium that **raids an M5 high**; M5 **change of character down**; sell the FVG | TP1 1R (50%), TP2 must be real sell-side liquidity at 2R+, **no runner**, 90-min time stop |
 | Sideways | **Fade the false breakout** | Ranges hold their edges; breakouts without expansion fail and return to the middle | H1 range 2-8x ATR, volatility not expanding; **sweep of a range edge that closes back inside**; buy/sell the **retest of the edge** (no displacement needed) | TP1 **range middle**, TP2 just before the **opposite edge** (1.5R+), no runner, 90-min time stop |
 
+First real-data results (one year of MT5 gold) and the tuning that came out of them are in
+`docs/backtest_2026-11.md`; `python scripts/tune_modes.py` re-runs the settings comparison on both
+halves of your stored history.
+
 Test them: `python -m quant_engine backtest --mode compare` runs every mode in every market
 (`comparison.md`), so you can check each one really does best in its own market. Settings: `modes:` in
 `config/strategy.yaml`. `mode: v1` switches back to the original sweep-reversal model.
