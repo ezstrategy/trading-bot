@@ -1,0 +1,23 @@
+storage:
+  root: data
+  format: parquet
+
+download:
+  default_days: 90                # history depth when no --start is given
+  chunk_days:                     # request size per call (MT5 limits large ranges)
+    M1: 7
+    M5: 30
+    M15: 60
+    H1: 180
+    H4: 365
+  tick_chunk_hours: 6
+
+quality:
+  # XAUUSD market hours in UTC used to tell expected closures from real gaps.
+  # Defaults fit most brokers (daily break around 21:00-22:00 UTC, weekend Fri 21:00 - Sun 22:00 UTC).
+  # They shift by an hour with US daylight saving; the tolerance covers that.
+  weekly_close: {weekday: 4, hour: 20}   # Friday (Mon=0), earliest close hour UTC
+  weekly_open: {weekday: 6, hour: 23}    # Sunday, latest open hour UTC
+  daily_break_utc: [20, 23]              # [start_hour, end_hour) window where a break is expected
+  max_spike_atr: 15.0                    # bar range larger than this x median range is flagged
+  max_tick_spread: 5.0                   # ask - bid above this (USD) is flagged

@@ -1,0 +1,9 @@
+# How the canonical instrument maps to your broker's symbol name.
+# Brokers use names like XAUUSD, XAUUSDm, XAUUSD.r, XAUUSD+, GOLD, GOLD.i ...
+XAUUSD:
+  # Set this to force an exact broker symbol (leave empty to auto-discover)
+  broker_symbol: ""
+  # Tried in order, exact match (case-insensitive)
+  candidates: [XAUUSD, XAUUSDm, XAUUSD.r, XAUUSD.a, XAUUSD+, XAUUSD.i, GOLD, GOLD.i, GOLDm]
+  # Fallback: regex over all broker symbols (must match exactly one)
+  pattern: '^(XAUUSD|GOLD)([._+\-]?[A-Za-z0-9]{0,4})?$'
