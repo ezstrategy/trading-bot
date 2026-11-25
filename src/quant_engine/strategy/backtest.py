@@ -17,7 +17,7 @@ from ..features.context import MarketFeatures
 from ..features.news import NewsCalendar
 from ..features.sessions import trading_day
 from ..timeframes import Timeframe
-from .entry import EntryModel, Signal
+from .entry import Signal
 from .lifecycle import kill_zone_end, simulate
 from .regime import regime_at, trend_regime_series
 
@@ -42,6 +42,7 @@ class Trade:
     trend_regime: str
     h4_structure: str
     bias: str
+    strategy: str = "v1"
 
 
 _kz_end = kill_zone_end   # kept for compatibility
@@ -50,9 +51,13 @@ _kz_end = kill_zone_end   # kept for compatibility
 class Backtester:
     """Runs the entry model over all stored history."""
 
-    def __init__(self, features: MarketFeatures, cfg: StrategyConfig, news: NewsCalendar | None = None) -> None:
+    def __init__(self, features: MarketFeatures, cfg: StrategyConfig, news: NewsCalendar | None = None,
+                 model=None) -> None:
         self.f, self.cfg = features, cfg
-        self.model = EntryModel(features, cfg, news)
+        if model is None:
+            from .modes import build_model
+            model = build_model(cfg.mode, features, cfg, news)
+        self.model = model
         m5 = features.bars[Timeframe.M5]
         self.t = features.times[Timeframe.M5]
         self.h, self.l, self.c = (m5[k].to_numpy(dtype="float64") for k in ("high", "low", "close"))
@@ -95,9 +100,10 @@ class Backtester:
             snap_regime = regime_at(self.h4, self.regimes, s.time)
             h4_state = self.f.snapshot(s.time).state[Timeframe.H4]
             bias = "BULL" if s.direction == 1 else "BEAR"
+            strategy = s.strategy
             base = dict(signal_time=s.time, side=s.side, grade=s.grade, score=s.score, entry=s.entry,
                         stop_loss=s.stop_loss, tp1=s.tp1, tp2=s.tp2, tp3=s.tp3, kill_zone=s.kill_zone,
-                        trend_regime=snap_regime, h4_structure=h4_state, bias=bias)
+                        trend_regime=snap_regime, h4_structure=h4_state, bias=bias, strategy=strategy)
             if s.grade == "B":
                 trades.append(Trade(**base, outcome="grade B: logged, not sent", filled=False,
                                     fill_time=None, exit_time=None, r=0.0))

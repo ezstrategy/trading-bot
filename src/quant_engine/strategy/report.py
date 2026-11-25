@@ -78,10 +78,11 @@ def to_markdown(title: str, meta: dict, trades: pd.DataFrame, rejections: dict, 
     if s.get("trades", 0) < 30:
         out += ["> Fewer than 30 filled trades: too few to judge the strategy. "
                 "Treat these numbers as a mechanics check only.\n"]
-    for by, name in (("trend_regime", "Market regime (H4 EMA50 trend)"),
+    for by, name in (("strategy", "Strategy mode"), ("trend_regime", "Market regime (H4 EMA50 trend)"),
                      ("h4_structure", "H4 structure state"), ("grade", "Grade"),
                      ("side", "Direction"), ("kill_zone", "Kill zone")):
-        out += [f"\n## By {name}\n", tbl(breakdown(trades, by, risk_pct))]
+        if by in trades.columns:
+            out += [f"\n## By {name}\n", tbl(breakdown(trades, by, risk_pct))]
     out += ["\n## By month\n", tbl(monthly(trades))]
     out += ["\n## Signal funnel\n", tbl(funnel(trades, rejections))]
     return "\n".join(out)

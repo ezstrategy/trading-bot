@@ -274,6 +274,42 @@ class NewsConfig(BaseModel):
     alert_before_min: int = Field(10, ge=0)
 
 
+class BullishModeConfig(BaseModel):
+    pullback_window: int = Field(36, ge=3)       # M5 candles to look back for the pullback low
+    min_pullback_atr: float = Field(1.0, ge=0)   # pullback depth from the prior high, in M5 ATR
+    ema_touch_atr: float = Field(0.25, ge=0)     # pullback low within this x M15 ATR of the fast EMA
+    tp2_r: float = Field(2.0, gt=0)              # measured-move TP2 when no liquidity is far enough
+    tp3_r: float = Field(3.0, ge=0)              # runner (0 = none)
+    time_stop_candles: int = Field(36, ge=1)     # trends need time: 3 hours
+
+
+class BearishModeConfig(BaseModel):
+    rally_window: int = Field(24, ge=3)          # M5 candles back to look for the buy-stop raid
+    tp2_min_r: float = Field(2.0, gt=0)
+    time_stop_candles: int = Field(18, ge=1)     # sell-offs work fast or not at all: 90 minutes
+
+
+class SidewaysModeConfig(BaseModel):
+    min_range_atr_h1: float = Field(2.0, gt=0)   # H1 range width limits, in H1 ATR
+    max_range_atr_h1: float = Field(8.0, gt=0)
+    max_vol_ratio: float = Field(1.3, gt=0)      # M5 ATR vs its time-of-day median; above = expanding
+    edge_zone: float = Field(0.15, gt=0, lt=0.5) # sweep level within this share of the range from an edge
+    min_wick: float = Field(0.4, ge=0, le=1)     # rejection wick share of the sweep candle
+    opposite_edge_buffer: float = Field(0.1, ge=0, lt=0.5)
+    tp2_min_r: float = Field(1.5, gt=0)          # range targets are capped by the opposite edge
+    time_stop_candles: int = Field(18, ge=1)
+
+
+class ModesConfig(BaseModel):
+    """The three regime strategies (strategy/modes.py)."""
+
+    ema_fast: int = Field(20, ge=2)
+    ema_slow: int = Field(50, ge=3)
+    bullish: BullishModeConfig = Field(default_factory=BullishModeConfig)
+    bearish: BearishModeConfig = Field(default_factory=BearishModeConfig)
+    sideways: SidewaysModeConfig = Field(default_factory=SidewaysModeConfig)
+
+
 class EntryConfig(BaseModel):
     min_score: int = Field(65, ge=0, le=100)
     a_plus_score: int = Field(80, ge=0, le=100)
@@ -313,7 +349,9 @@ class StrategyConfig(BaseModel):
     liquidity: LiquidityConfig = Field(default_factory=LiquidityConfig)
     sessions: SessionsConfig = Field(default_factory=SessionsConfig)
     volatility: VolatilityConfig = Field(default_factory=VolatilityConfig)
+    mode: Literal["regime", "v1", "bullish", "bearish", "sideways"] = "regime"
     news: NewsConfig = Field(default_factory=NewsConfig)
+    modes: ModesConfig = Field(default_factory=ModesConfig)
     entry: EntryConfig = Field(default_factory=EntryConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
 

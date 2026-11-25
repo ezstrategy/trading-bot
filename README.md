@@ -96,6 +96,21 @@ Reports go to `reports/backtest_<source>_<time>/` (`report.md`, `summary.json`, 
 Dukascopy candles are BID only, so the spread is assumed (`backtest.assumed_spread_points`).
 No news filter is applied yet.
 
+## Three strategy modes (one per market)
+
+`strategy.mode: regime` (default) asks the H4 regime detector which market it is at each M5 close
+and uses that market's own strategy. Each one has its own setup, trigger, entry, stop and exits:
+
+| Market | Strategy | Why it fits | Trigger and entry | Exits |
+|---|---|---|---|---|
+| Bullish | **Buy the dip** | Gold uptrends grind up in steps; pullbacks are shallow, hold the higher low and get bought at dynamic support | Pullback to the M15 EMA20/50 zone or H1 discount, higher low intact; M5 **break of structure up** with displacement; buy the FVG | TP1 1R (50%), TP2 next buy-side liquidity or 2R, **runner TP3 3R**, 3-hour time stop |
+| Bearish | **Sell the rally** | Gold sell-offs are fast; counter-trend rallies are weak and usually raid buy stops before rolling over | Rally into the H1 premium that **raids an M5 high**; M5 **change of character down**; sell the FVG | TP1 1R (50%), TP2 must be real sell-side liquidity at 2R+, **no runner**, 90-min time stop |
+| Sideways | **Fade the false breakout** | Ranges hold their edges; breakouts without expansion fail and return to the middle | H1 range 2-8x ATR, volatility not expanding; **sweep of a range edge that closes back inside**; buy/sell the **retest of the edge** (no displacement needed) | TP1 **range middle**, TP2 just before the **opposite edge** (1.5R+), no runner, 90-min time stop |
+
+Test them: `python -m quant_engine backtest --mode compare` runs every mode in every market
+(`comparison.md`), so you can check each one really does best in its own market. Settings: `modes:` in
+`config/strategy.yaml`. `mode: v1` switches back to the original sweep-reversal model.
+
 ## Phases 4-6: live signals, Telegram, news filter
 
 ```powershell

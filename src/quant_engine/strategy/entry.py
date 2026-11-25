@@ -68,6 +68,8 @@ class Signal:
     spread: float
     factors: dict[str, int] = field(default_factory=dict)
     reasons: list[str] = field(default_factory=list)
+    strategy: str = "v1"          # which model produced it (v1, bullish, bearish, sideways)
+    time_stop_candles: int | None = None   # mode-specific time stop (None = entry.time_stop_candles)
 
     @property
     def side(self) -> str:
@@ -83,7 +85,10 @@ class Signal:
 
 
 class EntryModel:
-    """Evaluates M5 candles for setups. ``rejections`` counts why candidates failed."""
+    """Strategy Spec v1 (sweep + reversal with the HTF bias). ``rejections`` counts why
+    candidates failed. The helper methods are shared with the regime modes in :mod:`.modes`."""
+
+    name = "v1"
 
     def __init__(self, features: MarketFeatures, cfg: StrategyConfig, news: "NewsCalendar | None" = None) -> None:
         self.f, self.cfg, self.news = features, cfg, news
@@ -113,53 +118,45 @@ class EntryModel:
         """M5 rows that complete a CHoCH (the only candles worth evaluating)."""
         return sorted(self.choch)
 
-    # ------------------------------------------------------------ evaluate
-    def evaluate(self, j: int) -> Signal | None:
-        """Signal for the M5 candle at row ``j`` (decided at its close), or None."""
-        d = self.choch.get(j)
-        if d is None:
-            return None
-        e, f = self.cfg.entry, self.f
-        t = f.times[Timeframe.M5][j] + Timeframe.M5.delta
-        if f.blocked[j]:
+    # ------------------------------------------------------ shared building blocks
+    def decision_time(self, j: int) -> pd.Timestamp:
+        return self.f.times[Timeframe.M5][j] + Timeframe.M5.delta
+
+    def session_gates(self, j: int, t: pd.Timestamp) -> bool:
+        """Gate 1: signal block, kill zone (+grace) and news blackout."""
+        if self.f.blocked[j]:
             return self._reject("1 signal block (Fri after 10:00 NY / Sunday)")
-        if not f.kill_zone_grace[j]:
+        if not self.f.kill_zone_grace[j]:
             return self._reject("1 outside kill zone")
         if self.news is not None and self.news.blackout(t) is not None:
             return self._reject("1 news blackout")
-        snap = f.snapshot(t)
-        if snap.bias != (BULL if d == 1 else BEAR):
-            return self._reject("2 HTF bias does not agree")
-        if not (snap.m15_allows_long if d == 1 else snap.m15_allows_short):
-            return self._reject("2 M15 opposes")
+        return True
 
-        # 3. sweep against the trade, still intact
-        sweeps = [s for s in snap.recent_sweeps if s.direction == d and s.sweep_idx <= j]
-        valid = []
-        for s in sweeps:
+    def intact_sweeps(self, snap, d: int, j: int) -> list:
+        """Recent sweeps against direction ``d`` whose extreme no close has broken since."""
+        out = []
+        for s in snap.recent_sweeps:
+            if s.direction != d or s.sweep_idx > j:
+                continue
             closes = self.c[s.reclaim_idx + 1:j + 1]
-            broken = (closes < s.extreme).any() if d == 1 else (closes > s.extreme).any()
-            if not broken:
-                valid.append(s)
-        if not valid:
-            return self._reject("3 no valid sweep in last 12 candles")
-        sweep = sorted(valid, key=lambda s: (liq.TIER_RANK[s.tier], -s.sweep_idx))[0]
-        a, extreme = sweep.sweep_idx, sweep.extreme
-        atr = self.atr[j]
+            if not ((closes < s.extreme).any() if d == 1 else (closes > s.extreme).any()):
+                out.append(s)
+        return out
 
-        # 4. displacement and FVG in the leg
+    def leg_entry(self, a: int, j: int, d: int, t: pd.Timestamp, extreme: float):
+        """Gates 4-5 on the leg from candle ``a`` (sweep / pullback extreme) to ``j``:
+        displacement, a valid FVG, and an entry in the leg's discount (longs) / premium
+        (shorts). Returns (entry, overlap_with_OB, largest displacement body in ATR) or None."""
         leg = np.arange(a, j + 1)
         disp_idx = leg[self.disp[leg] == d]
         if not len(disp_idx):
             return self._reject("4 no displacement in the leg")
         body_atr = max(abs(self.c[k] - self.o[k]) / self.atr[k] for k in disp_idx)
-        fv = f.fvgs
+        fv = self.f.fvgs
         fv = fv[(fv["direction"] == d) & fv["valid_size"] & (fv["c3_idx"] >= a + 1) & (fv["c3_idx"] <= j)
                 & (fv["invalidated_at"].isna() | (fv["invalidated_at"] > t))]
         if fv.empty:
             return self._reject("4 no valid FVG in the leg")
-
-        # 5. entry zone in the leg's discount / premium
         if d == 1:
             leg_hi, leg_lo = self.h[a:j + 1].max(), extreme
         else:
@@ -180,19 +177,24 @@ class EntryModel:
             else:
                 entry = r.ce
             if (d == 1 and entry <= mid) or (d == -1 and entry >= mid):
-                options.append((abs(entry - mid), entry, overlap, r))
+                options.append((abs(entry - mid), entry, overlap))
         if not options:
             return self._reject("5 entry not in the leg's discount/premium")
-        _, entry, overlap, fvg = min(options, key=lambda x: x[0])
+        _, entry, overlap = min(options, key=lambda x: x[0])
+        return float(entry), bool(overlap), float(body_atr)
 
-        # 6. volatility and spread
+    def market_ok(self, snap, j: int) -> float | None:
+        """Gate 6: volatility and spread. Returns the spread in price, or None."""
         if snap.vol_regime in (DEAD, CHAOS):
             return self._reject(f"6 volatility {snap.vol_regime}")
-        spread = self.spread_price(j)
         if not np.isnan(snap.spread_ratio) and snap.spread_ratio > self.cfg.volatility.max_spread_ratio:
             return self._reject("6 spread too wide")
+        return self.spread_price(j)
 
-        # 7. stop
+    def stop_for(self, extreme: float, entry: float, d: int, j: int, spread: float):
+        """Gate 7: stop beyond ``extreme`` with the buffer; returns (stop, risk) or None."""
+        e = self.cfg.entry
+        atr = self.atr[j]
         buffer = max(e.sl_buffer_atr * atr, e.sl_buffer_spreads * spread)
         sl = extreme - buffer if d == 1 else extreme + buffer
         risk = abs(entry - sl)
@@ -200,16 +202,69 @@ class EntryModel:
             return self._reject("7 stop distance outside 0.5-2.5 ATR")
         if risk < self.cfg.volatility.min_stop_spreads * spread:
             return self._reject("7 stop smaller than 5 spreads")
+        return float(sl), float(risk)
 
-        # 8. targets
+    def first_target(self, entry: float, risk: float, d: int, t: pd.Timestamp) -> float:
+        """TP1: nearest confirmed M5 swing at least ``tp1_min_r`` away, else exactly that."""
         sw = self.m5_swings
         sw = sw[(sw["known_at"] <= t) & (sw["kind"] == ("high" if d == 1 else "low"))]
-        min_tp1 = entry + d * e.tp1_min_r * risk
+        min_tp1 = entry + d * self.cfg.entry.tp1_min_r * risk
         beyond = sw[(sw["price"] - min_tp1) * d >= 0]["price"]
-        tp1 = float(beyond.min() if d == 1 else beyond.max()) if len(beyond) else min_tp1
-        pools = snap.pools[snap.pools["kind"].isin(TARGET_POOLS)
-                           & (snap.pools["side"] == ("high" if d == 1 else "low"))]
-        levels = sorted({float(p) for p in pools["price"] if (p - tp1) * d > 0}, key=lambda p: (p - entry) * d)
+        return float(beyond.min() if d == 1 else beyond.max()) if len(beyond) else float(min_tp1)
+
+    def pool_levels(self, snap, d: int, beyond: float, entry: float, kinds=TARGET_POOLS) -> list[float]:
+        """Untaken liquidity on the target side, past ``beyond``, nearest first."""
+        pools = snap.pools[snap.pools["kind"].isin(kinds) & (snap.pools["side"] == ("high" if d == 1 else "low"))]
+        return sorted({float(p) for p in pools["price"] if (p - beyond) * d > 0}, key=lambda p: (p - entry) * d)
+
+    def grade(self, score: int) -> str:
+        e = self.cfg.entry
+        return "A+" if score >= e.a_plus_score else "A" if score >= e.min_score else \
+            "B" if score >= e.b_grade_score else "-"
+
+    def session_points(self, a: int) -> tuple[str, int]:
+        kz = str(self.f.session[a])
+        return kz, 10 if kz == self.cfg.entry.preferred_kill_zone else 5 if kz in KILL_ZONES else 0
+
+    # ------------------------------------------------------------ evaluate
+    def evaluate(self, j: int) -> Signal | None:
+        """Signal for the M5 candle at row ``j`` (decided at its close), or None."""
+        d = self.choch.get(j)
+        if d is None:
+            return None
+        e, f = self.cfg.entry, self.f
+        t = self.decision_time(j)
+        if not self.session_gates(j, t):
+            return None
+        snap = f.snapshot(t)
+        if snap.bias != (BULL if d == 1 else BEAR):
+            return self._reject("2 HTF bias does not agree")
+        if not (snap.m15_allows_long if d == 1 else snap.m15_allows_short):
+            return self._reject("2 M15 opposes")
+
+        # 3. sweep against the trade, still intact
+        valid = self.intact_sweeps(snap, d, j)
+        if not valid:
+            return self._reject("3 no valid sweep in last 12 candles")
+        sweep = sorted(valid, key=lambda s: (liq.TIER_RANK[s.tier], -s.sweep_idx))[0]
+        a, extreme = sweep.sweep_idx, sweep.extreme
+
+        # 4-5. displacement, FVG and entry
+        got = self.leg_entry(a, j, d, t, extreme)
+        if not got:
+            return None
+        entry, overlap, body_atr = got
+        # 6-7. market and stop
+        spread = self.market_ok(snap, j)
+        if spread is None:
+            return None
+        st = self.stop_for(extreme, entry, d, j, spread)
+        if not st:
+            return None
+        sl, risk = st
+        # 8. targets
+        tp1 = self.first_target(entry, risk, d, t)
+        levels = self.pool_levels(snap, d, tp1, entry)
         if not levels:
             return self._reject("8 no liquidity target beyond TP1")
         tp2 = levels[0]
@@ -217,7 +272,7 @@ class EntryModel:
             return self._reject("8 TP2 closer than 2R")
         tp3 = next((p for p in levels[1:] if (p - entry) * d >= e.tp3_min_r * risk), None)
 
-        # score
+        kz, session_pts = self.session_points(a)
         factors = {
             "htf_alignment": snap.htf_points,
             "liquidity_swept": SWEEP_POINTS[sweep.tier],
@@ -227,14 +282,11 @@ class EntryModel:
             "premium_discount": 10 if snap.dealing_range is not None and (
                 (d == 1 and entry < snap.dealing_range.equilibrium)
                 or (d == -1 and entry > snap.dealing_range.equilibrium)) else 0,
-            "session_fit": 0,
+            "session_fit": session_pts,
             "reward_to_tp2": 10 if (tp2 - entry) * d >= 3 * risk else 5,
         }
-        kz = str(f.session[a])
-        factors["session_fit"] = 10 if kz == e.preferred_kill_zone else 5 if kz in KILL_ZONES else 0
         score = int(sum(factors.values()))
-        grade = "A+" if score >= e.a_plus_score else "A" if score >= e.min_score else \
-            "B" if score >= e.b_grade_score else "-"
+        grade = self.grade(score)
         if grade == "-":
             return self._reject("9 score below 50")
         reasons = [
@@ -247,4 +299,4 @@ class EntryModel:
             f"TP2 at {tp2:.2f} ({(tp2 - entry) * d / risk:.1f}R)",
         ]
         return Signal(t, j, d, float(entry), float(sl), float(tp1), float(tp2), tp3, score, grade,
-                      a, float(extreme), kz, spread, factors, reasons)
+                      a, float(extreme), kz, spread, factors, reasons, self.name)

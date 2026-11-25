@@ -160,15 +160,17 @@ def backtest_reports(root: str = "reports") -> list[Path]:
     return sorted((d for d in p.glob("backtest_*") if (d / "summary.json").exists()), reverse=True) if p.exists() else []
 
 
-def run_backtest_now(cfg: AppConfig, store: ParquetStore, source: str, point: float) -> Path:
+def run_backtest_now(cfg: AppConfig, store: ParquetStore, source: str, point: float,
+                     mode: str | None = None) -> Path:
     """Run a backtest on stored bars (``mt5`` or ``dukascopy``) and return its report folder."""
     from ..cli import dukascopy_dataset
     from ..strategy.runner import run_backtest
     canonical = cfg.engine.instrument
     ds = dukascopy_dataset(canonical) if source == "dukascopy" else canonical
-    out = Path("reports") / f"backtest_{source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+    mode = mode or cfg.strategy.mode
+    out = Path("reports") / f"backtest_{source}_{mode}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
     note = "Dukascopy XAU/USD spot BID M1 (UTC), spread assumed" if source == "dukascopy" else "MT5 broker bars (UTC)"
-    run_backtest(cfg, store, ds, point, out, source_note=note)
+    run_backtest(cfg, store, ds, point, out, source_note=note, mode=mode)
     return out
 
 

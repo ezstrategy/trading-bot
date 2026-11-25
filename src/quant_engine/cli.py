@@ -9,7 +9,7 @@
     python -m quant_engine context [--at "2026-11-24 13:05"] [--point 0.01]
     python -m quant_engine dashboard [--port 8501]
     python -m quant_engine dukascopy --start 2026-05-01 [--end 2026-11-24]   (free history, no MT5)
-    python -m quant_engine backtest [--source mt5|dukascopy] [--start ...] [--end ...]
+    python -m quant_engine backtest [--source mt5|dukascopy] [--mode regime|v1|bullish|bearish|sideways|compare]
     python -m quant_engine run [--dry-run] [--once]      (live signals to Telegram; never trades)
     python -m quant_engine news                           (refresh the economic calendar, show blocks)
     python -m quant_engine telegram-test                  (send a test message)
@@ -81,6 +81,8 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--start")
     bt.add_argument("--end")
     bt.add_argument("--point", type=float, default=0.01, help="tick size (XAUUSD: 0.01)")
+    bt.add_argument("--mode", choices=["regime", "v1", "bullish", "bearish", "sideways", "compare"],
+                    help="strategy to test (default: strategy.mode in config); compare = all modes x markets")
     bt.add_argument("--out", help="report folder (default reports/backtest_<source>_<time>)")
     rn = sub.add_parser("run", help="live signal engine: watch MT5, send signals to Telegram (never trades)")
     rn.add_argument("--dry-run", action="store_true", help="print messages instead of sending to Telegram")
@@ -159,9 +161,10 @@ def _backtest(cfg, store: ParquetStore, canonical: str, args: argparse.Namespace
             if args.source == "dukascopy" else f"MT5 broker bars for {canonical} (UTC)")
     start = pd.Timestamp(args.start, tz="UTC") if args.start else None
     end = pd.Timestamp(args.end, tz="UTC") if args.end else None
-    out = args.out or f"reports/backtest_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+    mode = args.mode or cfg.strategy.mode
+    out = args.out or f"reports/backtest_{args.source}_{mode}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
     try:
-        summary = run_backtest(cfg, store, ds, args.point, out, start, end, note)
+        summary = run_backtest(cfg, store, ds, args.point, out, start, end, note, mode)
     except ValueError as exc:
         hint = "python -m quant_engine dukascopy --days 180" if args.source == "dukascopy" \
             else "python -m quant_engine download"
