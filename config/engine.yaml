@@ -12,6 +12,15 @@ timeframes:
 risk:
   per_trade_pct: 0.5              # used by later phases for position sizing in signals
 
+live:                             # python -m quant_engine run  (signals only, never trades)
+  poll_seconds: 10                # how often MT5 is checked for a newly closed M5 candle
+  lookback_days: {M5: 30, M15: 30, H1: 60, H4: 200}   # history loaded each cycle
+  max_signal_age_minutes: 4       # a signal is only sent right after its candle closes
+  state_dir: data/signals         # sent signals, follow-ups and the message log
+  daily_summary_time: "22:30"     # daily Telegram summary (local time below)
+  summary_timezone: Asia/Kolkata
+  balance_fallback: 10000         # lot sizing balance if MT5 does not report one
+
 logging:
   level: INFO
   json: true                      # structured JSON lines

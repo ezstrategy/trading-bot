@@ -6,6 +6,7 @@ client, which blocks order functions.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -138,3 +139,44 @@ def market_status(s: MarketSnapshot) -> list[tuple[str, str, str]]:
         ("Volatility", s.vol_regime, "good" if s.vol_regime == "normal" else "bad"),
     ]
     return cards
+
+
+# ------------------------------------------------------------ phases 3-6
+def signals_table(state_dir: str) -> pd.DataFrame:
+    """Every signal the live engine sent, newest first."""
+    from ..live.state import EngineState
+    st = EngineState(state_dir)
+    rows = [{"time": s.signal.time, "side": s.signal.side, "grade": s.signal.grade, "score": s.signal.score,
+             "entry": s.signal.entry, "stop": s.signal.stop_loss, "tp1": s.signal.tp1, "tp2": s.signal.tp2,
+             "lots": s.lots, "status": s.status, "outcome": s.outcome, "r": s.r}
+            for s in st.signals.values()]
+    df = pd.DataFrame(rows)
+    return df.sort_values("time", ascending=False).reset_index(drop=True) if len(df) else df
+
+
+def backtest_reports(root: str = "reports") -> list[Path]:
+    """Backtest report folders, newest first."""
+    p = Path(root)
+    return sorted((d for d in p.glob("backtest_*") if (d / "summary.json").exists()), reverse=True) if p.exists() else []
+
+
+def run_backtest_now(cfg: AppConfig, store: ParquetStore, source: str, point: float) -> Path:
+    """Run a backtest on stored bars (``mt5`` or ``dukascopy``) and return its report folder."""
+    from ..cli import dukascopy_dataset
+    from ..strategy.runner import run_backtest
+    canonical = cfg.engine.instrument
+    ds = dukascopy_dataset(canonical) if source == "dukascopy" else canonical
+    out = Path("reports") / f"backtest_{source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+    note = "Dukascopy XAU/USD spot BID M1 (UTC), spread assumed" if source == "dukascopy" else "MT5 broker bars (UTC)"
+    run_backtest(cfg, store, ds, point, out, source_note=note)
+    return out
+
+
+def news_table(cfg: AppConfig, now: pd.Timestamp, refresh: bool = False) -> pd.DataFrame:
+    """Upcoming news blocks (start, end, tier, title)."""
+    from ..features.news import NewsCalendar, load_calendar, refresh_calendar
+    nc = cfg.strategy.news
+    events = refresh_calendar(nc) if refresh else load_calendar(nc.calendar_file)
+    cal = NewsCalendar(events, nc)
+    return pd.DataFrame([{"start": w.start, "end": w.end, "event": w.event_time, "tier": w.tier, "title": w.title}
+                         for w in cal.windows if w.end > now])

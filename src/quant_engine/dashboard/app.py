@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -192,7 +191,91 @@ def render() -> None:
         st.code(json.dumps(summary, indent=2, default=str), language="json")
 
 
-if live:
-    st.fragment(render, run_every=interval)()
-else:
-    render()
+def render_signals() -> None:
+    tz = TIME_ZONES[tz_label]
+    st.caption("Start the live engine with `python -m quant_engine run` (or start_signals.bat). "
+               "It sends signals to Telegram and never places trades.")
+    sig = services.signals_table(cfg.engine.live.state_dir)
+    if sig.empty:
+        st.info("No signals sent yet.")
+    else:
+        closed = sig[sig["r"].notna()]
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Signals sent", len(sig))
+        c2.metric("Closed", len(closed))
+        c3.metric("Total R (closed)", f"{closed['r'].sum():+.2f}" if len(closed) else "0")
+        st.dataframe(_local(sig, tz), hide_index=True, width="stretch")
+    from quant_engine.live.state import read_messages
+    msgs = read_messages(cfg.engine.live.state_dir, 100)
+    st.markdown("**Message log**")
+    st.dataframe(_local(msgs, tz), hide_index=True, width="stretch")
+
+
+def render_backtest() -> None:
+    st.caption("Results come only from a reproducible run on stored data. Fewer than 30 trades says little.")
+    c1, c2 = st.columns([2, 1])
+    source = c1.radio("Data", ["dukascopy", "mt5"], horizontal=True,
+                      format_func=lambda s: "Dukascopy (free history)" if s == "dukascopy" else "MT5 (downloaded)",
+                      help="Get Dukascopy data with: python -m quant_engine dukascopy --days 180")
+    if c2.button("Run backtest", width="stretch"):
+        out = mt5_action("Running backtest", services.run_backtest_now, cfg, store, source, float(ss["point"]))
+        if out:
+            st.success(f"Saved to {out}")
+    if ss.get("last_error"):
+        st.error(ss.pop("last_error"))
+    reports = services.backtest_reports()
+    if not reports:
+        st.info("No backtest yet. Run one above (or double-click start_backtest.bat).")
+        return
+    pick = st.selectbox("Report", reports, format_func=lambda p: p.name)
+    summary = json.loads((pick / "summary.json").read_text())
+    overall = summary["overall"]
+    cols = st.columns(5)
+    for col, (k, label) in zip(cols, [("trades", "Trades"), ("win_rate_pct", "Win rate %"), ("total_r", "Total R"),
+                                      ("profit_factor", "Profit factor"), ("max_drawdown_r", "Max drawdown R")]):
+        col.metric(label, overall.get(k, "-") if overall.get(k) is not None else "-")
+    by = pd.DataFrame(summary.get("by_trend_regime", []))
+    st.markdown("**By market regime (bullish / bearish / neutral)**")
+    st.dataframe(by, hide_index=True, width="stretch")
+    trades_csv = pick / "trades.csv"
+    if trades_csv.exists():
+        tr = pd.read_csv(trades_csv)
+        f = tr[tr["filled"]]
+        if len(f):
+            st.markdown("**Equity curve (R)**")
+            st.line_chart(f["r"].cumsum().reset_index(drop=True))
+        with st.expander("All signals"):
+            st.dataframe(tr, hide_index=True, width="stretch")
+    with st.expander("Full report"):
+        st.markdown((pick / "report.md").read_text())
+
+
+def render_news() -> None:
+    tz = TIME_ZONES[tz_label]
+    refresh = st.button("Refresh calendar now")
+    try:
+        df = services.news_table(cfg, pd.Timestamp.now(tz="UTC"), refresh=refresh)
+    except Exception as exc:  # shown, never crashes the page
+        st.error(f"Calendar problem: {exc}")
+        return
+    if df.empty:
+        st.info("No upcoming news blocks in the cached calendar. Press Refresh (needs internet).")
+        return
+    for c in ("start", "end", "event"):
+        df[c] = pd.to_datetime(df[c], utc=True).dt.tz_convert(tz).dt.strftime("%a %d %b %H:%M")
+    st.caption("New signals are blocked inside these windows (USD high-impact news and bank holidays).")
+    st.dataframe(df, hide_index=True, width="stretch")
+
+
+tab_market, tab_signals, tab_bt, tab_news = st.tabs(["Market", "Signals", "Backtest", "News"])
+with tab_market:
+    if live:
+        st.fragment(render, run_every=interval)()
+    else:
+        render()
+with tab_signals:
+    render_signals()
+with tab_bt:
+    render_backtest()
+with tab_news:
+    render_news()

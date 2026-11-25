@@ -114,7 +114,7 @@ def _stub_backtester(signals, results):
     bt.regimes = pd.Series([NEUTRAL] * 40)
     bt.f = SimpleNamespace(snapshot=lambda t: SimpleNamespace(state={Timeframe.H4: "ranging"}))
     bt.model = _StubModel(signals)
-    bt.signals = []
+    bt.signals, bt.decisions, bt.results = [], [], {}
     bt._simulate = lambda s: ("sim", True, s.m5_idx + 1, s.m5_idx + 2, results[s.m5_idx])
     return bt
 

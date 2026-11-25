@@ -15,6 +15,7 @@ def sim(bars, direction=1, entry=100.0, sl=98.0, tp1=102.0, tp2=104.0, tp3=None,
     """Run ``_simulate`` for a signal sent at the close of row 0 of ``bars`` (list of (h, l, c))."""
     bt = object.__new__(Backtester)
     bt.cfg = cfg or StrategyConfig()
+    bt.results = {}
     arr = np.array(bars, dtype="float64")
     bt.h, bt.l, bt.c = arr[:, 0], arr[:, 1], arr[:, 2]
     bt.t = pd.DatetimeIndex(pd.date_range(START, periods=len(bars), freq="5min"))
@@ -115,3 +116,21 @@ def test_kill_zone_end_follows_new_york_dst():
         pd.Timestamp("2026-11-23 15:00", tz="UTC")
     assert _kz_end(pd.Timestamp("2026-07-01 07:30", tz="UTC"), "london_kz", cfg) == \
         pd.Timestamp("2026-07-01 09:00", tz="UTC")
+
+
+def test_events_follow_the_trade_and_pending_at_end_of_data():
+    from quant_engine.strategy.lifecycle import BREAKEVEN, FILLED, TP1, simulate
+    bars = [FAR, (100.2, 99.6, 100.1), (102.1, 100.5, 101.8), (101.0, 100.2, 100.3)]
+    arr = np.array(bars)
+    t = pd.DatetimeIndex(pd.date_range(START, periods=len(bars), freq="5min"))
+    s = Signal(t[0] + pd.Timedelta(minutes=5), 0, 1, 100.0, 98.0, 102.0, 104.0, None, 70, "A", 0, 98.5,
+               "newyork_kz", SP)
+    res = simulate(s, t, arr[:, 0], arr[:, 1], arr[:, 2], StrategyConfig())
+    assert [e.kind for e in res.events] == [FILLED, TP1, BREAKEVEN] and not res.is_open
+    assert res.events[1].time == t[2] + pd.Timedelta(minutes=5) and res.events[1].r == 0.5
+    # cut after the fill: the trade is still open, only the fill is known
+    part = simulate(s, t[:2], arr[:2, 0], arr[:2, 1], arr[:2, 2], StrategyConfig())
+    assert part.is_open and [e.kind for e in part.events] == [FILLED]
+    # signal on the last candle: pending, nothing happened yet
+    none = simulate(s, t[:1], arr[:1, 0], arr[:1, 1], arr[:1, 2], StrategyConfig())
+    assert none.is_open and none.outcome == "pending" and none.events == []

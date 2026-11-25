@@ -59,6 +59,18 @@ class LoggingConfig(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class LiveConfig(BaseModel):
+    """Live signal loop (Phase 4/5). Signals only: nothing here can trade."""
+
+    poll_seconds: float = Field(10.0, gt=0)
+    lookback_days: dict[str, int] = Field(default_factory=lambda: {"M5": 30, "M15": 30, "H1": 60, "H4": 200})
+    max_signal_age_minutes: float = Field(4.0, gt=0)    # never send a signal older than this
+    state_dir: str = "data/signals"
+    daily_summary_time: str = "22:30"
+    summary_timezone: str = "Asia/Kolkata"
+    balance_fallback: float = Field(10000.0, gt=0)      # used only if MT5 gives no account balance
+
+
 class EngineConfig(BaseModel):
     instrument: str = "XAUUSD"
     style: str = "intraday_scalping"
@@ -66,6 +78,7 @@ class EngineConfig(BaseModel):
     timeframes: TimeframesConfig = Field(default_factory=TimeframesConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    live: LiveConfig = Field(default_factory=LiveConfig)
 
 
 # --------------------------------------------------------------------- mt5.yaml
@@ -242,6 +255,25 @@ class VolatilityConfig(BaseModel):
     min_stop_spreads: float = Field(5.0, ge=0)
 
 
+class NewsConfig(BaseModel):
+    """Economic-calendar blackout (Strategy Spec v1, "News and volatility filters")."""
+
+    enabled: bool = True
+    currencies: list[str] = Field(default_factory=lambda: ["USD"])
+    calendar_file: str = "data/news/calendar.csv"
+    feed_url: str = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+    refresh_minutes: int = Field(60, ge=5)
+    tier1_keywords: list[str] = Field(default_factory=lambda: [
+        "Non-Farm", "NFP", "CPI", "FOMC", "Federal Funds Rate", "Fed Chair", "Interest Rate Decision"])
+    tier1_before_min: int = Field(60, ge=0)
+    tier1_after_min: int = Field(30, ge=0)
+    fomc_after_min: int = Field(90, ge=0)
+    high_before_min: int = Field(30, ge=0)
+    high_after_min: int = Field(15, ge=0)
+    block_holidays: bool = True
+    alert_before_min: int = Field(10, ge=0)
+
+
 class EntryConfig(BaseModel):
     min_score: int = Field(65, ge=0, le=100)
     a_plus_score: int = Field(80, ge=0, le=100)
@@ -281,6 +313,7 @@ class StrategyConfig(BaseModel):
     liquidity: LiquidityConfig = Field(default_factory=LiquidityConfig)
     sessions: SessionsConfig = Field(default_factory=SessionsConfig)
     volatility: VolatilityConfig = Field(default_factory=VolatilityConfig)
+    news: NewsConfig = Field(default_factory=NewsConfig)
     entry: EntryConfig = Field(default_factory=EntryConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
 

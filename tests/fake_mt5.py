@@ -119,7 +119,7 @@ class FakeMT5:
         return SimpleNamespace(connected=self.link_up, name="FakeTerminal")
 
     def account_info(self):
-        return SimpleNamespace(login=123456, server="Fake-Demo", trade_mode=0) if self.initialized else None
+        return SimpleNamespace(login=123456, server="Fake-Demo", trade_mode=0, balance=10000.0, currency="USD") if self.initialized else None
 
     # ------------------------------------------------------------- symbols
     def symbols_get(self, group: str | None = None):

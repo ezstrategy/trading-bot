@@ -1,6 +1,5 @@
 """Dashboard service layer, chart and a headless render of the Streamlit page."""
 import json
-import os
 from pathlib import Path
 
 import pandas as pd
@@ -113,3 +112,24 @@ def test_dashboard_command_launches_streamlit_on_localhost(monkeypatch, config_d
     assert cmd[1:4] == ["-m", "streamlit", "run"] and cmd[4].endswith("app.py")
     assert cmd[cmd.index("--server.address") + 1] == "localhost" and "8600" in cmd
     assert calls["env"]["QE_CONFIG_DIR"] == str(config_dir)
+
+
+def test_app_signals_backtest_and_news_tabs(config_dir, cfg, filled, monkeypatch, tmp_path):
+    from quant_engine.live.state import EngineState, SentSignal
+    from quant_engine.strategy.entry import Signal
+    monkeypatch.chdir(tmp_path)
+    st = EngineState("data/signals")
+    s = Signal(pd.Timestamp("2026-11-23 13:00", tz="UTC"), 1, 1, 2650.0, 2647.0, 2653.0, 2656.0, None, 70,
+               "A", 0, 2647.5, "newyork_kz", 0.3)
+    st.signals[s.time.isoformat()] = SentSignal(s, 1, 0.16, status="closed", outcome="stop loss", r=-1.0)
+    st.save()
+    at = _app(config_dir, monkeypatch).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "Signals sent" in [m.label for m in at.metric]
+    assert any("No backtest yet" in i.value for i in at.info)
+    next(r for r in at.radio if r.label == "Data").set_value("mt5").run()
+    run_bt = next(b for b in at.button if b.label == "Run backtest")
+    run_bt.click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("Saved to reports" in x.value for x in at.success)
+    assert "Win rate %" in [m.label for m in at.metric]

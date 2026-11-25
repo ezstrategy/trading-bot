@@ -10,6 +10,7 @@ from ..config import AppConfig
 from ..data.quality import validate_bars
 from ..data.storage import ParquetStore
 from ..features.context import STRUCTURE_TFS, MarketFeatures
+from ..features.news import NewsCalendar, load_calendar
 from ..logging_setup import get_logger
 from ..timeframes import Timeframe
 from . import report
@@ -30,7 +31,10 @@ def run_backtest(cfg: AppConfig, store: ParquetStore, dataset: str, point: float
     m5 = bars[Timeframe.M5]
     quality = validate_bars(m5, Timeframe.M5, cfg.data.quality, dataset=f"{dataset} M5")
     features = MarketFeatures(bars, cfg.strategy, point)
-    bt = Backtester(features, cfg.strategy)
+    first, last = m5["time"].iat[0], m5["time"].iat[-1]
+    cal = NewsCalendar(load_calendar(cfg.strategy.news.calendar_file), cfg.strategy.news)
+    use_news = cfg.strategy.news.enabled and cal.covers(first, last)
+    bt = Backtester(features, cfg.strategy, cal if use_news else None)
     trades = bt.run()
     risk = cfg.strategy.backtest.risk_pct
     meta = {
@@ -40,7 +44,8 @@ def run_backtest(cfg: AppConfig, store: ParquetStore, dataset: str, point: float
         "M5 data quality issues": quality.counts() or "none",
         "risk per trade": f"{risk}% (1R)",
         "assumed spread when missing": f"{cfg.strategy.backtest.assumed_spread_points:g} points",
-        "news filter": "not applied (no calendar source yet)",
+        "news filter": (f"applied ({len(cal.windows)} blocking windows from {cfg.strategy.news.calendar_file})"
+                        if use_news else "not applied (the cached calendar does not cover this period)"),
     }
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
