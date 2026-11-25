@@ -1,0 +1,44 @@
+# Market-structure settings for the XAUUSD strategy (Strategy Spec v1).
+# Every distance is in ATR units so the same rules can later run on forex.
+atr_period: 14
+
+swings:                 # fractal length L per timeframe (confirmed L candles later)
+  M5: 2
+  M15: 3
+  H1: 3
+  H4: 3
+
+structure:
+  ranging_lookback: 10  # two opposite breaks within this many candles = ranging
+
+displacement:
+  min_body_atr: 1.2     # body >= 1.2 x ATR(14, M5)
+  min_body_ratio: 0.6   # body >= 60% of the candle range
+
+fvg:
+  min_size_atr: 0.25
+  min_size_spreads: 3.0
+
+liquidity:
+  sweep_max_depth_atr: 1.5   # wick beyond the pool by at most 1.5 x ATR(14, M5)
+  sweep_reclaim_candles: 3   # close back inside on the sweep candle or the next 2
+  sweep_valid_candles: 12    # CHoCH must follow within 12 M5 candles
+  equal_level_atr_m15: 0.1   # equal highs/lows: swings within 0.1 x ATR(14, M15)
+  swing_pool_lookback_days: 5
+
+sessions:               # New York local time, [start, end)
+  asia: ["20:00", "24:00"]
+  london_kz: ["02:00", "05:00"]
+  newyork_kz: ["07:00", "10:00"]
+  london_close: ["10:00", "12:00"]
+  rollover: ["16:55", "18:05"]
+  kill_zone_grace_minutes: 30
+  friday_cutoff: "10:00"     # no new signals on Friday after this NY time
+  trading_day_start: "17:00" # NY close
+
+volatility:
+  median_days: 20
+  dead_ratio: 0.6
+  chaos_ratio: 2.5
+  max_spread_ratio: 1.5
+  min_stop_spreads: 5.0

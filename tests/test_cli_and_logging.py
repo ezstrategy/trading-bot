@@ -81,3 +81,13 @@ def test_setup_logging_writes_file(tmp_path):
     for h in logging.getLogger("quant_engine").handlers:
         h.flush()
     assert json.loads(f.read_text().splitlines()[-1])["event"] == "hello"
+
+
+def test_context_command(run, capsys):
+    assert run("context") == 1  # nothing stored yet
+    assert run("download", "--timeframes", "M5,M15,H1,H4", "--start", "2026-10-20", "--end", "2026-11-24 10:00") == 0
+    capsys.readouterr()
+    assert run("context", "--at", "2026-11-23 13:00") == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["session"] == "newyork_kz" and set(out["structure"]) == {"M5", "M15", "H1", "H4"}
+    assert out["bias"] in ("BULL", "BEAR", "NONE")

@@ -169,12 +169,110 @@ class DataConfig(BaseModel):
     quality: QualityConfig = Field(default_factory=QualityConfig)
 
 
+# ---------------------------------------------------------------- strategy.yaml
+_HHMM = r"^([01]\d|2[0-4]):[0-5]\d$"
+
+
+def hhmm_to_minutes(value: str) -> int:
+    """'07:30' -> 450 minutes after midnight ('24:00' -> 1440)."""
+    h, m = value.split(":")
+    return int(h) * 60 + int(m)
+
+
+class Window(BaseModel):
+    """A [start, end) window in New York local time, stored as minutes after midnight."""
+
+    start: int
+    end: int
+
+    @model_validator(mode="before")
+    @classmethod
+    def _from_pair(cls, v: object) -> object:
+        if isinstance(v, (list, tuple)) and len(v) == 2:
+            for x in v:
+                if not re.match(_HHMM, str(x)):
+                    raise ValueError(f"time {x!r} must be HH:MM")
+            return {"start": hhmm_to_minutes(v[0]), "end": hhmm_to_minutes(v[1])}
+        return v
+
+
+class StructureConfig(BaseModel):
+    ranging_lookback: int = Field(10, ge=1)
+
+
+class DisplacementConfig(BaseModel):
+    min_body_atr: float = Field(1.2, gt=0)
+    min_body_ratio: float = Field(0.6, gt=0, le=1)
+
+
+class FVGConfig(BaseModel):
+    min_size_atr: float = Field(0.25, ge=0)
+    min_size_spreads: float = Field(3.0, ge=0)
+
+
+class LiquidityConfig(BaseModel):
+    sweep_max_depth_atr: float = Field(1.5, gt=0)
+    sweep_reclaim_candles: int = Field(3, ge=1)
+    sweep_valid_candles: int = Field(12, ge=1)
+    equal_level_atr_m15: float = Field(0.1, ge=0)
+    swing_pool_lookback_days: int = Field(5, ge=1)
+
+
+class SessionsConfig(BaseModel):
+    asia: Window = Window(start=20 * 60, end=24 * 60)
+    london_kz: Window = Window(start=2 * 60, end=5 * 60)
+    newyork_kz: Window = Window(start=7 * 60, end=10 * 60)
+    london_close: Window = Window(start=10 * 60, end=12 * 60)
+    rollover: Window = Window(start=16 * 60 + 55, end=18 * 60 + 5)
+    kill_zone_grace_minutes: int = Field(30, ge=0)
+    friday_cutoff: int = 10 * 60
+    trading_day_start: int = 17 * 60
+
+    @field_validator("friday_cutoff", "trading_day_start", mode="before")
+    @classmethod
+    def _hhmm(cls, v: object) -> int:
+        return hhmm_to_minutes(v) if isinstance(v, str) else int(v)  # type: ignore[arg-type]
+
+
+class VolatilityConfig(BaseModel):
+    median_days: int = Field(20, ge=1)
+    dead_ratio: float = Field(0.6, gt=0)
+    chaos_ratio: float = Field(2.5, gt=0)
+    max_spread_ratio: float = Field(1.5, gt=0)
+    min_stop_spreads: float = Field(5.0, ge=0)
+
+
+class StrategyConfig(BaseModel):
+    atr_period: int = Field(14, ge=1)
+    swings: dict[Timeframe, int] = Field(default_factory=lambda: {
+        Timeframe.M5: 2, Timeframe.M15: 3, Timeframe.H1: 3, Timeframe.H4: 3})
+    structure: StructureConfig = Field(default_factory=StructureConfig)
+    displacement: DisplacementConfig = Field(default_factory=DisplacementConfig)
+    fvg: FVGConfig = Field(default_factory=FVGConfig)
+    liquidity: LiquidityConfig = Field(default_factory=LiquidityConfig)
+    sessions: SessionsConfig = Field(default_factory=SessionsConfig)
+    volatility: VolatilityConfig = Field(default_factory=VolatilityConfig)
+
+    @field_validator("swings", mode="before")
+    @classmethod
+    def _parse_swings(cls, v: dict) -> dict:
+        out = {Timeframe.parse(k): int(n) for k, n in v.items()}
+        if any(n < 1 for n in out.values()):
+            raise ValueError("swing length must be >= 1")
+        return out
+
+    def swing_length(self, tf: Timeframe) -> int:
+        """Fractal length L for a timeframe (defaults to 3)."""
+        return self.swings.get(tf, 3)
+
+
 # ----------------------------------------------------------------------- loader
 class AppConfig(BaseModel):
     engine: EngineConfig
     mt5: MT5Config
     symbols: dict[str, SymbolMapping]
     data: DataConfig
+    strategy: StrategyConfig = Field(default_factory=StrategyConfig)
     credentials: MT5Credentials = Field(default_factory=MT5Credentials, repr=False)
 
     def mapping(self, canonical: str | None = None) -> SymbolMapping:
@@ -222,6 +320,8 @@ def load_config(config_dir: str | Path | None = None, *, load_env_file: bool = T
             symbols={k.upper(): SymbolMapping(**(v or {}))
                      for k, v in _read_yaml(root / "symbols.yaml").items()},
             data=DataConfig(**_read_yaml(root / "data.yaml")),
+            strategy=StrategyConfig(**_read_yaml(root / "strategy.yaml"))
+            if (root / "strategy.yaml").exists() else StrategyConfig(),
             credentials=MT5Credentials.from_env(),
         )
     except ConfigError:
