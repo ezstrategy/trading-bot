@@ -72,6 +72,11 @@ modes:
     opposite_edge_buffer: 0.1
     tp2_min_r: 1.5           # GUESS: range targets are capped by the opposite edge
     time_stop_candles: 18
+    # TP1 = nearer of the range middle and this many R (0 = always the middle). On 1 year of MT5
+    # gold (docs/backtest_2026-11.md) the middle sat ~5-20R from the tight edge stop and 10 of 18
+    # losers had been 1R+ in profit first; 1R cut the regime drawdown from 13R to 9R.
+    tp1_max_r: 1.0
+    min_stop_atr: 0.0        # widen tighter stops to this x M5 ATR (0 = off; 1.0 tested, no gain)
 
 news:                        # Strategy Spec v1, "News and volatility filters"
   enabled: true

@@ -62,6 +62,42 @@ def test_each_mode_finds_setups_with_its_own_shape(world):
         assert "False breakout" in s.reasons[1]
 
 
+def _sideways_signals(f, cfg):
+    m = RangeFadeModel(f, cfg)
+    return m, [s for s in (m.evaluate(j) for j in m.candidates()) if s]
+
+
+def test_sideways_tp1_cap_banks_half_before_the_range_middle(world):
+    _, _, f, _ = world
+    cfg = StrategyConfig()
+    cfg.modes.sideways.tp1_max_r = 1.0
+    _, sigs = _sideways_signals(f, cfg)
+    assert sigs
+    for s in sigs:
+        mid = f.snapshot(s.time).dealing_range.equilibrium
+        to_tp1, to_mid = (s.tp1 - s.entry) * s.direction, (mid - s.entry) * s.direction
+        assert to_tp1 == pytest.approx(min(to_mid, s.risk))       # nearer of 1R and the middle
+        assert (s.tp2 - s.tp1) * s.direction > 0                    # TP2 still at the far edge
+        assert f"TP1 {s.tp1:.2f}" in s.reasons[-1]
+
+
+def test_sideways_min_stop_widens_tight_stops(world):
+    _, _, f, _ = world
+    base, wide = StrategyConfig(), StrategyConfig()
+    wide.modes.sideways.min_stop_atr = 1.0
+    m, sigs = _sideways_signals(f, wide)
+    _, before = _sideways_signals(f, base)
+    assert sigs
+    for s in sigs:
+        assert s.risk >= 1.0 * m.atr[s.m5_idx] - 1e-9
+        assert (s.sweep_extreme - s.stop_loss) * s.direction > 0     # still beyond the sweep
+    # a stop already wider than 1 ATR is left alone
+    by_idx = {s.m5_idx: s for s in sigs}
+    for s in before:
+        if s.risk >= 1.0 * m.atr[s.m5_idx] and s.m5_idx in by_idx:
+            assert by_idx[s.m5_idx].stop_loss == pytest.approx(s.stop_loss)
+
+
 def test_factor_points_add_up_to_at_most_100(world):
     _, _, _, sigs = world
     for mode, lst in sigs.items():

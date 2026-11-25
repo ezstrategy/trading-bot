@@ -298,6 +298,8 @@ class SidewaysModeConfig(BaseModel):
     opposite_edge_buffer: float = Field(0.1, ge=0, lt=0.5)
     tp2_min_r: float = Field(1.5, gt=0)          # range targets are capped by the opposite edge
     time_stop_candles: int = Field(18, ge=1)
+    tp1_max_r: float = Field(0.0, ge=0)          # TP1 = nearer of range middle and this many R (0 = middle only)
+    min_stop_atr: float = Field(0.0, ge=0)       # widen a tighter stop to this x M5 ATR (0 = off)
 
 
 class ModesConfig(BaseModel):

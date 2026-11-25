@@ -191,12 +191,15 @@ class EntryModel:
             return self._reject("6 spread too wide")
         return self.spread_price(j)
 
-    def stop_for(self, extreme: float, entry: float, d: int, j: int, spread: float):
-        """Gate 7: stop beyond ``extreme`` with the buffer; returns (stop, risk) or None."""
+    def stop_for(self, extreme: float, entry: float, d: int, j: int, spread: float, widen_to_atr: float = 0.0):
+        """Gate 7: stop beyond ``extreme`` with the buffer; returns (stop, risk) or None.
+        ``widen_to_atr`` > 0 moves a stop closer than that many M5 ATR out to that distance."""
         e = self.cfg.entry
         atr = self.atr[j]
         buffer = max(e.sl_buffer_atr * atr, e.sl_buffer_spreads * spread)
         sl = extreme - buffer if d == 1 else extreme + buffer
+        if widen_to_atr > 0 and abs(entry - sl) < widen_to_atr * atr:
+            sl = entry - d * widen_to_atr * atr
         risk = abs(entry - sl)
         if not (e.min_stop_atr * atr <= risk <= e.max_stop_atr * atr):
             return self._reject("7 stop distance outside 0.5-2.5 ATR")

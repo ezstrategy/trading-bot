@@ -354,14 +354,16 @@ class RangeFadeModel(_ModeBase):
         spread = self.market_ok(snap, j)
         if spread is None:
             return None
-        st = self.stop_for(extreme, entry, d, j, spread)
+        st = self.stop_for(extreme, entry, d, j, spread, widen_to_atr=c.min_stop_atr)
         if not st:
             return None
         sl, risk = st
         mid = dr.equilibrium
-        tp1 = mid
-        if (tp1 - entry) * d < self.cfg.entry.tp1_min_r * risk:
+        if (mid - entry) * d < self.cfg.entry.tp1_min_r * risk:
             return self._reject("8 range middle closer than 1R")
+        # TP1 banks half and moves the stop to breakeven; a far range middle (often 5R+ from a
+        # tight edge stop) is rarely reached first, so it can be capped at tp1_max_r.
+        tp1 = entry + d * min((mid - entry) * d, c.tp1_max_r * risk) if c.tp1_max_r > 0 else mid
         far = dr.high if d == 1 else dr.low
         tp2 = far - d * c.opposite_edge_buffer * width
         rr2 = (tp2 - entry) * d / risk
@@ -383,7 +385,8 @@ class RangeFadeModel(_ModeBase):
             f"False breakout of the range {'low' if d == 1 else 'high'}: swept {best.pool_kind} {best.level:.2f}, "
             f"{'closed back inside on the same candle' if best.same_candle else 'rejected with a long wick'}",
             f"{'Buy' if d == 1 else 'Sell'} the retest of the edge {entry:.2f}, stop beyond the sweep",
-            f"TP1 range middle {tp1:.2f}, TP2 before the opposite edge {tp2:.2f} ({rr2:.1f}R)",
+            (f"TP1 {tp1:.2f} (range middle)" if tp1 == mid else f"TP1 {tp1:.2f} ({c.tp1_max_r:g}R, before the middle {mid:.2f})")
+            + f", TP2 before the opposite edge {tp2:.2f} ({rr2:.1f}R)",
         ]
         return self.finish(t, j, d, entry, sl, tp1, tp2, None, factors, reasons, a, extreme, spread,
                            c.time_stop_candles)
