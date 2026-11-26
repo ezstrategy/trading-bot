@@ -424,10 +424,12 @@ def test_bigmoves_small_targets_and_exit_summary(config_dir, tmp_path, monkeypat
         store.write_bars("XAUUSD", tf, planted[tf])
     rep = tmp_path / "bm10"
     assert cli.run(["--config", str(config_dir), "bigmoves", "--start", "2026-06-01", "--targets", "10,20",
-                    "--stops", "5,10", "--windows", "6,12", "--move-pips", "10,20", "--out", str(rep)]) == 0
+                    "--stops", "5,10", "--windows", "6,12", "--move-pips", "10,20", "--spread-points", "8",
+                    "--out", str(rep)]) == 0
     cand = pd.read_csv(rep / "strategy_candidates.csv")
     assert set(cand["tp_atr"].round(2)) == {1.0, 2.0} and set(cand["sl_atr"].round(2)) == {0.5, 1.0}
     assert set(cand["horizon"]) == {6, 12}
     md = (rep / "report.md").read_text()
     assert "Every target / stop / time limit" in md and "| 20 | 10 | 60 |" in md
+    assert "spread charged**: $0.08" in md
     assert "30 pips" not in md.split("## 1.")[0] or "10 pips = $1" in md

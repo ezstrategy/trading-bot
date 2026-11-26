@@ -130,7 +130,8 @@ def run_bigmoves(cfg: AppConfig, store: ParquetStore, dataset: str, point: float
     rc = sc.research.model_copy(update={
         "exit_units": "usd", "sl_atr": [p * pip for p in bm["stop_pips"]],
         "tp_atr": [p * pip for p in bm["target_pips"]], "horizons": windows,
-        "only_families": [SETUP_FAMILY]})
+        "only_families": [SETUP_FAMILY],
+        **({"fixed_spread_points": float(bm["spread_points"])} if bm.get("spread_points") is not None else {})})
     m5 = bars[Timeframe.M5]
     et = build_events(m5, bars[Timeframe.H4], rc, sc.sessions, point, sc.backtest.assumed_spread_points,
                       regime_kwargs(sc), Timeframe.M5)
