@@ -133,6 +133,9 @@ def build_parser() -> argparse.ArgumentParser:
     lo.add_argument("--point", type=float, default=0.01)
     lo.add_argument("--spread-points", type=float, default=8.0, help="spread per trade in points (8 = $0.08)")
     lo.add_argument("--min-trades", type=int, default=300, help="fewest older-data trades for the chosen version")
+    lo.add_argument("--grid", choices=["standard", "high-win"], default="standard",
+                    help="high-win = small targets, TP1 half close + runner, early break-even")
+    lo.add_argument("--min-win", type=float, default=0.0, help="choose only among versions winning this %% or more")
     lo.add_argument("--out")
     rn = sub.add_parser("run", help="live signal engine: watch MT5, send signals to Telegram (never trades)")
     rn.add_argument("--dry-run", action="store_true", help="print messages instead of sending to Telegram")
@@ -345,7 +348,8 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
                                  pd.Timestamp(args.start, tz="UTC") if args.start else None,
                                  pd.Timestamp(args.end, tz="UTC") if args.end else None,
                                  f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)",
-                                 spread_points=args.spread_points, min_trades=args.min_trades)
+                                 spread_points=args.spread_points, min_trades=args.min_trades,
+                                 grid=args.grid, min_win=args.min_win)
         except ValueError as exc:
             print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
             return 1

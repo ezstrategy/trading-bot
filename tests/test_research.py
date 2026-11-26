@@ -596,6 +596,30 @@ def test_london_cli_report(config_dir, tmp_path, monkeypatch, planted):
                     "--out", str(rep)]) == 0
     md = (rep / "report.md").read_text()
     assert "Published rules vs the best version" in md and "Each change on its own" in md
-    assert "(published)" in md and "Year by year" in md
+    assert "(chosen)" in md and "Year by year" in md
     assert "past the 17:00 New York rollover (swap)**: 0" in md
     assert len(pd.read_csv(rep / "versions.csv")) == 360
+
+
+def test_london_tp1_half_close_raises_win_rate(planted):
+    from quant_engine.research.classics import london_breakout
+    m5 = planted[Timeframe.M5]
+    plain = pd.DataFrame(london_breakout(m5, 0.08, CFG.sessions, {"target_r": 2.0, "be_r": None}))
+    tp1 = pd.DataFrame(london_breakout(m5, 0.08, CFG.sessions, {"target_r": 2.0, "be_r": None, "tp1_r": 0.5}))
+    assert len(plain) == len(tp1)
+    assert (tp1["r"] > 0).mean() >= (plain["r"] > 0).mean()
+    assert tp1["r"].max() <= 1.25 + 1e-6          # half at 0.5R + half at 2R
+
+
+def test_london_high_win_grid_cli(config_dir, tmp_path, monkeypatch, planted):
+    monkeypatch.chdir(tmp_path)
+    store = ParquetStore(tmp_path / "data")
+    for tf in TFS:
+        store.write_bars("XAUUSD", tf, planted[tf])
+    rep = tmp_path / "hw"
+    assert cli.run(["--config", str(config_dir), "london", "--start", "2026-01-01", "--min-trades", "20",
+                    "--grid", "high-win", "--min-win", "50", "--out", str(rep)]) == 0
+    md = (rep / "report.md").read_text()
+    assert "Versions winning 50%+" in md and "high-win" in md and "TP1: half closed at" in md
+    v = pd.read_csv(rep / "versions.csv")
+    assert len(v) == 793                          # tp1 must be below the target; + the published rules

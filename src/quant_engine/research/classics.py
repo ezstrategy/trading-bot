@@ -95,7 +95,7 @@ def _days(t: pd.DatetimeIndex, cfg) -> np.ndarray:
 
 
 LB_DEFAULT = {"target_r": 2.5, "be_r": 1.5, "close_min": LB_CLOSE, "range_filter": True,
-              "stop": "range", "trend": "none", "buffer": LB_BUFFER}
+              "stop": "range", "trend": "none", "buffer": LB_BUFFER, "tp1_r": None}
 
 
 def london_breakout(m5: pd.DataFrame, sp: float, cfg, params: dict | None = None,
@@ -103,7 +103,8 @@ def london_breakout(m5: pd.DataFrame, sp: float, cfg, params: dict | None = None
     """Asian-range breakout with stop orders (see SOURCES). ``params`` overrides :data:`LB_DEFAULT`:
     ``target_r``, ``be_r`` (None = no break-even), ``close_min`` (NY minutes), ``range_filter``
     (0.30-1.60% of price), ``stop`` ("range" = other side, "mid" = middle of the range),
-    ``trend`` ("none", "with" = only the H4 market direction, neutral days trade both ways)."""
+    ``trend`` ("none", "with" = only the H4 market direction, neutral days trade both ways),
+    ``tp1_r`` (None, or close half at this R, move the stop to entry and let the rest run to the target)."""
     p = {**LB_DEFAULT, **(params or {})}
     t = pd.DatetimeIndex(m5["time"])
     o, h, l, c = (m5[k].to_numpy(float) for k in ("open", "high", "low", "close"))
@@ -147,8 +148,22 @@ def london_breakout(m5: pd.DataFrame, sp: float, cfg, params: dict | None = None
             if risk <= 0 or (entry - stop) * side <= 0:
                 break
             tgt = entry + side * p["target_r"] * risk
-            j, px_out = _walk(i, end_i, side, entry, stop, tgt, o, h, l, c, sp, be_r=p["be_r"],
-                              fill_bar_target=False)
+            tp1 = p.get("tp1_r")
+            if tp1 is not None and tp1 < p["target_r"]:
+                lvl1 = entry + side * tp1 * risk
+                j, px1 = _walk(i, end_i, side, entry, stop, lvl1, o, h, l, c, sp,
+                               be_r=p["be_r"] if p["be_r"] is not None and p["be_r"] < tp1 else None,
+                               fill_bar_target=False)
+                if side * (px1 - lvl1) >= -1e-9 and j < end_i:     # TP1 hit: the rest runs from the next candle
+                    j, px2 = _walk(j + 1, end_i, side, entry, entry, tgt, o, h, l, c, sp)
+                    px_out = (px1 + px2) / 2
+                elif side * (px1 - lvl1) >= -1e-9:
+                    px_out = (px1 + c[end_i] + (sp if side == -1 else 0.0)) / 2
+                else:
+                    px_out = px1
+            else:
+                j, px_out = _walk(i, end_i, side, entry, stop, tgt, o, h, l, c, sp, be_r=p["be_r"],
+                                  fill_bar_target=False)
             out.append(_trade(t, i, j, side, entry, px_out, stop))
             break
     return out
