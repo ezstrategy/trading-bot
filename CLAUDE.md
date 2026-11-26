@@ -44,3 +44,9 @@ If a request conflicts with them, stop and ask the owner.
 15. Work in phases. Finish the current phase, run the tests, fix failures, write a completion
     report, then **wait for the owner's review before starting the next phase**.
 16. Mark assumptions clearly ("GUESS:" in code comments or in the report) and ask when unsure.
+
+## Research rules (owner, 2026-11-26)
+17. All strategy research follows `docs/RESEARCH_RULEBOOK.md` (no mass parameter sweeps,
+    development / validation / untouched out-of-sample split + walk-forward, full costs incl.
+    commission and slippage, the 14 required metrics, independent audit, rule-14 classification).
+18. Log every experiment in `docs/EXPERIMENT_LOG.md`; never overwrite a tested version.
