@@ -95,22 +95,41 @@ def lift_table(et: EventTable, up: np.ndarray, dn: np.ndarray, size: float, spli
     return pd.DataFrame(rows).sort_values("lift", ascending=False) if rows else pd.DataFrame()
 
 
+def exit_summary(t: pd.DataFrame) -> pd.DataFrame:
+    """Per exit rule: trade-weighted target-hit rate and average dollars over all setups."""
+    if t is None or t.empty:
+        return pd.DataFrame()
+    rows = []
+    for (tp, sl, mins), g in t.groupby(["target_pips", "stop_pips", "minutes"]):
+        w = g["trades"].astype(float)
+        rows.append({"target_pips": int(tp), "stop_pips": int(sl), "minutes": int(mins), "setups": len(g),
+                     "trades": int(w.sum()),
+                     "target_hit_pct": round(float((g["win_rate_pct"] * w).sum() / w.sum()), 1),
+                     "breakeven_win_pct": float(g["breakeven_win_pct"].iat[0]),
+                     "avg_usd_per_trade": round(float((g["avg_usd_per_trade"] * w).sum() / w.sum()), 3),
+                     "setups_profitable_pct": round(100 * float((g["avg_r"] > 0).mean()), 1)})
+    return pd.DataFrame(rows)
+
+
 def run_bigmoves(cfg: AppConfig, store: ParquetStore, dataset: str, point: float, out_dir: str | Path,
                  start: pd.Timestamp | None = None, end: pd.Timestamp | None = None,
-                 source_note: str = "") -> dict:
-    """Run the three steps on M5 candles and write ``report.md`` plus CSV files."""
+                 source_note: str = "", overrides: dict | None = None) -> dict:
+    """Run the three steps on M5 candles and write ``report.md`` plus CSV files.
+    ``overrides`` replace ``research.bigmoves`` settings (e.g. target_pips, stop_pips, window_bars;
+    ``window_bars`` may be a list, the first one is used for steps 1-2)."""
     sc = cfg.strategy
     bm = {"pip_usd": 0.10, "move_pips": [30, 50], "window_bars": 6,
-          "target_pips": [30, 50], "stop_pips": [20, 30, 50], **sc.research.bigmoves}
+          "target_pips": [30, 50], "stop_pips": [20, 30, 50], **sc.research.bigmoves, **(overrides or {})}
     pip = float(bm["pip_usd"])
-    window = int(bm["window_bars"])
+    windows = [int(w) for w in (bm["window_bars"] if isinstance(bm["window_bars"], list) else [bm["window_bars"]])]
+    window = windows[0]
     bars = {tf: store.read_bars(dataset, tf, start, end) for tf in STRUCTURE_TFS}
     missing = [tf.value for tf, b in bars.items() if b.empty]
     if missing:
         raise ValueError(f"No stored {dataset} data for {', '.join(missing)}")
     rc = sc.research.model_copy(update={
         "exit_units": "usd", "sl_atr": [p * pip for p in bm["stop_pips"]],
-        "tp_atr": [p * pip for p in bm["target_pips"]], "horizons": [window],
+        "tp_atr": [p * pip for p in bm["target_pips"]], "horizons": windows,
         "only_families": [SETUP_FAMILY]})
     m5 = bars[Timeframe.M5]
     et = build_events(m5, bars[Timeframe.H4], rc, sc.sessions, point, sc.backtest.assumed_spread_points,
@@ -140,7 +159,9 @@ def run_bigmoves(cfg: AppConfig, store: ParquetStore, dataset: str, point: float
         t["stop_pips"] = (t["sl_atr"] / pip).round().astype(int)
         t["breakeven_win_pct"] = (100 * (t["sl_atr"] + cost) / (t["sl_atr"] + t["tp_atr"])).round(1)
         t["avg_usd_per_trade"] = (t["avg_r"] * t["sl_atr"]).round(2)
-    cols = ["regime", "side", "event", "session", "target_pips", "stop_pips", "trades", "win_rate_pct",
+    if len(t):
+        t["minutes"] = t["horizon"] * 5
+    cols = ["regime", "side", "event", "session", "target_pips", "stop_pips", "minutes", "trades", "win_rate_pct",
             "breakeven_win_pct", "avg_usd_per_trade", "p", "bh_pass"]
     best = t.drop_duplicates(["event", "regime", "session", "direction"]).head(15) if len(t) else t
     hi_win = t[t["win_rate_pct"] >= 70].head(10) if len(t) else t
@@ -170,7 +191,12 @@ def run_bigmoves(cfg: AppConfig, store: ParquetStore, dataset: str, point: float
           "### Best combinations on the discovery data\n",
           _table(best, cols),
           "\n### Combinations with a 70%+ win rate (discovery data)\n",
-          _table(hi_win, cols) if len(hi_win) else "_none with enough trades_\n"]
+          _table(hi_win, cols) if len(hi_win) else "_none with enough trades_\n",
+          "\n### Every target / stop / time limit, all setups together (discovery data)\n",
+          "How often the target was hit before the stop, and the average result, over all tested setups. "
+          "Trades closed by the time limit count as neither win nor full loss.\n",
+          _table(exit_summary(t), ["target_pips", "stop_pips", "minutes", "setups", "trades", "target_hit_pct",
+                                   "breakeven_win_pct", "avg_usd_per_trade", "setups_profitable_pct"])]
     if len(s):
         md += ["\n### Passed discovery, checked on unseen data\n",
                _table(s, ["verdict", "regime", "side", "event", "session", "tp_atr", "sl_atr", "trades",

@@ -101,6 +101,10 @@ def build_parser() -> argparse.ArgumentParser:
     bg.add_argument("--start", default="2020-01-01")
     bg.add_argument("--end")
     bg.add_argument("--point", type=float, default=0.01)
+    bg.add_argument("--targets", help="target pips, comma separated (e.g. 10,20)")
+    bg.add_argument("--stops", help="stop pips, comma separated (e.g. 5,10)")
+    bg.add_argument("--windows", help="time limits in M5 candles, comma separated (e.g. 6,12)")
+    bg.add_argument("--move-pips", help="move sizes for the 'how often' steps (e.g. 10,20)")
     bg.add_argument("--out")
     rn = sub.add_parser("run", help="live signal engine: watch MT5, send signals to Telegram (never trades)")
     rn.add_argument("--dry-run", action="store_true", help="print messages instead of sending to Telegram")
@@ -292,7 +296,11 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
             summary = run_bigmoves(cfg, store, ds, args.point, out,
                                    pd.Timestamp(args.start, tz="UTC") if args.start else None,
                                    pd.Timestamp(args.end, tz="UTC") if args.end else None,
-                                   f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)")
+                                   f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)",
+                                   overrides={k: [float(x) if k != "window_bars" else int(x) for x in v.split(",")]
+                                              for k, v in (("target_pips", args.targets), ("stop_pips", args.stops),
+                                                           ("window_bars", args.windows), ("move_pips", args.move_pips))
+                                              if v})
         except ValueError as exc:
             print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
             return 1
