@@ -12,6 +12,7 @@
     python -m quant_engine backtest [--source mt5|dukascopy] [--mode regime|v1|bullish|bearish|sideways|compare]
     python -m quant_engine patterns [--source mt5|dukascopy] [--timeframe M5|H1|H4]   (find repeatable patterns)
     python -m quant_engine bigmoves [--start 2020-01-01]   (30-50 pip moves in 30 min: causes + strategy test)
+    python -m quant_engine entries [--start 2020-01-01]    (your dip/sweep + reversal candle entry, backtested)
     python -m quant_engine run [--dry-run] [--once]      (live signals to Telegram; never trades)
     python -m quant_engine news                           (refresh the economic calendar, show blocks)
     python -m quant_engine telegram-test                  (send a test message)
@@ -107,6 +108,15 @@ def build_parser() -> argparse.ArgumentParser:
     bg.add_argument("--move-pips", help="move sizes for the 'how often' steps (e.g. 10,20)")
     bg.add_argument("--spread-points", type=float, help="spread charged per trade in points (gold: 8 = $0.08)")
     bg.add_argument("--out")
+    en = sub.add_parser("entries", help="the owner's entry: sweep of a 30-min low/high + reversal candle")
+    en.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    en.add_argument("--start", default="2020-01-01")
+    en.add_argument("--end")
+    en.add_argument("--point", type=float, default=0.01)
+    en.add_argument("--spread-points", type=float, default=8.0, help="spread per trade in points (8 = $0.08)")
+    en.add_argument("--example", action="append", default=None,
+                    help='your trade to check, "YYYY-MM-DD HH:MM,BUY" in UTC (repeatable)')
+    en.add_argument("--out")
     rn = sub.add_parser("run", help="live signal engine: watch MT5, send signals to Telegram (never trades)")
     rn.add_argument("--dry-run", action="store_true", help="print messages instead of sending to Telegram")
     rn.add_argument("--once", action="store_true", help="run one cycle and exit")
@@ -303,6 +313,24 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
                                                            ("window_bars", args.windows), ("move_pips", args.move_pips))
                                               if v} | ({"spread_points": args.spread_points}
                                                        if args.spread_points is not None else {}))
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2, default=str))
+        print(f"Report: {out}/report.md")
+        return 0
+    if args.cmd == "entries":
+        from .research.entries import OWNER_EXAMPLES, run_entries
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/entries_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        examples = OWNER_EXAMPLES if args.example is None else [
+            (e.split(",")[0].strip(), 1 if e.split(",")[1].strip().upper() == "BUY" else -1) for e in args.example]
+        try:
+            summary = run_entries(cfg, store, ds, args.point, out,
+                                  pd.Timestamp(args.start, tz="UTC") if args.start else None,
+                                  pd.Timestamp(args.end, tz="UTC") if args.end else None,
+                                  f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)",
+                                  examples=examples, overrides={"spread_points": args.spread_points})
         except ValueError as exc:
             print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
             return 1

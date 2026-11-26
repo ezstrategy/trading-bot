@@ -433,3 +433,60 @@ def test_bigmoves_small_targets_and_exit_summary(config_dir, tmp_path, monkeypat
     assert "Every target / stop / time limit" in md and "| 20 | 10 | 60 |" in md
     assert "spread charged**: $0.08" in md
     assert "30 pips" not in md.split("## 1.")[0] or "10 pips = $1" in md
+
+
+# ------------------------------------------------------------------ the owner's entry
+def _entry_bars(tail):
+    """``_m5`` adds 30 quiet candles first, so ``tail[0]`` is candle 30."""
+    return _m5(tail + [(4012, 4012.5, 4011.5, 4012)] * 10)
+
+
+ENTRY_P = {**__import__("quant_engine.research.entries", fromlist=["DEFAULTS"]).DEFAULTS, "min_risk_atr": 0.0}
+
+
+def test_entry_buy_fires_on_sweep_then_green_close_above_sweep_high():
+    from quant_engine.research.entries import find_signals
+    # 30: sweep below 4009 (low 4005, high 4009.5); 31: red, no trigger; 32: green close 4010 > 4009.5
+    m5 = _entry_bars([(4009, 4009.5, 4005, 4006), (4006, 4007, 4005.5, 4006.5), (4006.5, 4010.5, 4006, 4010)])
+    s = find_signals(m5, ENTRY_P, 0.08)
+    assert list(np.nonzero(s.signal[1])[0]) == [32]
+    assert s.sweep_idx[1][32] == 30
+    assert s.stop[1][32] < 4005 and s.risk[1][32] == pytest.approx(4010.08 - s.stop[1][32])
+    assert not s.signal[-1][:33].any()
+
+
+def test_entry_no_signal_if_low_breaks_or_too_late():
+    from quant_engine.research.entries import find_signals
+    broke = _entry_bars([(4009, 4009.5, 4005, 4006), (4006, 4006.5, 4004, 4004.5), (4004.5, 4010.5, 4004.4, 4010)])
+    s = find_signals(broke, ENTRY_P, 0.08)
+    assert s.sweep_idx[1][32] != 30          # the break at 31 is a new sweep, not a confirmation of 30
+    late = _entry_bars([(4009, 4009.5, 4005, 4006)] + [(4006, 4007, 4005.5, 4006.5)] * 3
+                       + [(4006.5, 4010.5, 4006, 4010)])
+    s2 = find_signals(late, ENTRY_P, 0.08)
+    assert not s2.signal[1][34] or s2.sweep_idx[1][34] != 30
+
+
+def test_entry_signal_does_not_use_future_candles():
+    from quant_engine.research.entries import find_signals
+    base = _entry_bars([(4009, 4009.5, 4005, 4006), (4006, 4007, 4005.5, 4006.5), (4006.5, 4010.5, 4006, 4010)])
+    full = find_signals(base, ENTRY_P, 0.08)
+    cut = find_signals(base.iloc[:33].reset_index(drop=True), ENTRY_P, 0.08)
+    assert cut.signal[1][32] == full.signal[1][32]
+    assert cut.stop[1][32] == pytest.approx(full.stop[1][32])
+
+
+def test_entries_cli_report_and_examples(config_dir, tmp_path, monkeypatch, planted):
+    monkeypatch.chdir(tmp_path)
+    store = ParquetStore(tmp_path / "data")
+    for tf in TFS:
+        store.write_bars("XAUUSD", tf, planted[tf])
+    rep = tmp_path / "en"
+    assert cli.run(["--config", str(config_dir), "entries", "--start", "2026-06-01", "--out", str(rep),
+                    "--example", "2026-07-01 13:00,BUY"]) == 0
+    md = (rep / "report.md").read_text()
+    assert "Does the rule catch your trades?" in md and "spread charged**: $0.08" in md
+    assert "breakeven_win_pct" in md
+    sigs = pd.read_csv(rep / "signals.csv")
+    assert len(sigs) > 0 and set(sigs["side"]) <= {"BUY", "SELL"}
+    cand = pd.read_csv(rep / "candidates.csv")
+    assert set(cand["target_r"]) <= {1.0, 2.0, 3.0} and set(cand["filter"]) <= {"any", "flush", "with trend"}
