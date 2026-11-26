@@ -74,3 +74,30 @@ def test_full_report_has_all_breakdowns():
     md = report_markdown("test", rep)
     for word in ("Long / short", "By session", "By market regime", "Monthly", "max_consecutive_losses"):
         assert word in md
+
+
+def test_first_touch_order_and_pessimism():
+    from quant_engine.research.study import first_touch
+    h = np.array([10, 11, 13, 10.0]); l = np.array([10, 9.5, 9.0, 10.0]); c = np.array([10, 10, 10, 10.0])
+    idx = np.array([0, 0])
+    r = first_touch(h, l, c, idx, np.array([10.8, 12.5]), np.array([9.0, 8.0]))
+    assert r.tolist() == [1, 1]
+    assert first_touch(h, l, c, np.array([1]), np.array([12.5]), np.array([9.0])).tolist() == [-1]   # both in one candle: down
+
+
+def test_study_cli_uses_development_part_only(config_dir, tmp_path, monkeypatch):
+    from quant_engine import cli
+    from quant_engine.data.storage import ParquetStore
+    from .synthetic import TFS, synthetic_bars
+    monkeypatch.chdir(tmp_path)
+    b = synthetic_bars(days=150, seed=4)
+    store = ParquetStore(tmp_path / "data")
+    for tf in TFS:
+        store.write_bars("XAUUSD", tf, b[tf])
+    rep = tmp_path / "st"
+    assert cli.run(["--config", str(config_dir), "study", "--start", "2026-01-01", "--out", str(rep)]) == 0
+    md = (rep / "report.md").read_text()
+    last = b[TFS[0]]["time"].iat[-1]
+    assert "studied part**: development" in md and f"{last:%Y-%m-%d}" not in md.split("studied part")[1].split("\n")[0]
+    for k in ("1. Time in each regime", "2. Drift", "3. Momentum", "4. Breakouts", "5. Sweeps"):
+        assert k in md
