@@ -353,3 +353,28 @@ def test_patterns_cli_price_action_since_date(config_dir, tmp_path, monkeypatch,
     md = (rep / "report.md").read_text()
     assert "idea families tested**: price action, price action at levels" in md
     assert "period (UTC)**: 2026-08-0" in md      # 2026-08-01 is a Saturday
+
+
+def test_smc_fvg_and_order_block_retests():
+    m5 = _m5([(4010, 4010.5, 4009.5, 4009.8),   # small bearish candle = order block
+              (4009.8, 4016, 4009.7, 4015.8),   # impulse up (creates the FVG with the next candle)
+              (4015.8, 4018, 4012, 4017),       # low 4012 > high 4010.5 two candles back: bullish FVG
+              (4017, 4017.5, 4011, 4013),       # taps into the gap, closes above its bottom: FVG retest
+              (4013, 4013.5, 4009.9, 4012)])    # back into the order block and holds: OB retest
+    et = _ev(m5)
+    k = 30
+    assert et.events["bullish FVG retest"][k + 3] and not et.events["bullish FVG retest"][k + 4]
+    assert et.events["bullish OB retest"][k + 4]
+
+
+def test_smc_asia_sweep_after_asia_only(planted):
+    from quant_engine.research.events import event_family
+    et = _events(planted)
+    ny = et.times.tz_convert("America/New_York")
+    hit = et.events["swept Asia low"]
+    assert hit.sum() > 0
+    m = np.asarray(ny.hour * 60 + ny.minute)[hit]
+    assert ((m < 17 * 60)).all()                                    # after Asia (00:00-17:00 New York)
+    day = pd.Series(hit).groupby(np.asarray(et.times.tz_convert("America/New_York").date)).sum()
+    assert day.max() <= 2                                           # first sweep per trading day
+    assert event_family("swept Asia low") == event_family("bullish FVG retest") == "smc"

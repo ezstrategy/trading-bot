@@ -161,6 +161,7 @@ def build_events(m5: pd.DataFrame, h4: pd.DataFrame, rc: ResearchConfig, session
 
     _levels_and_news(ev, nat, t, o, h, l, c, a, valid, rc, tf)
     _price_action(ev, nat, o, h, l, c, a, valid, rc, tf)
+    _smc(ev, nat, t, o, h, l, c, a, valid, rc, sessions)
 
     for k in ev:
         ev[k] = np.nan_to_num(ev[k], nan=False).astype(bool)
@@ -290,7 +291,80 @@ def _price_action(ev: dict, nat: dict, o, h, l, c, a, valid, rc: ResearchConfig,
         ev[name], nat[name] = valid & mask, d
 
 
-PRICE_ACTION_FAMILIES = ("price action", "price action at levels")
+def _first_tap(zone_idx: np.ndarray, top: np.ndarray, bottom: np.ndarray, side: int, h, l, c,
+               window: int, n: int) -> np.ndarray:
+    """Mask of the first candle within ``window`` after each zone where price trades back into
+    the zone and closes on the zone's side (above its bottom for bullish zones, below its top
+    for bearish ones)."""
+    out = np.zeros(n, dtype=bool)
+    alive = np.ones(len(zone_idx), dtype=bool)
+    for off in range(1, window + 1):
+        j = zone_idx + off
+        ok = alive & (j < n)
+        if not ok.any():
+            break
+        jj = np.where(ok, j, 0)
+        if side == 1:
+            tap = ok & (l[jj] <= top)
+            hold = c[jj] > bottom
+        else:
+            tap = ok & (h[jj] >= bottom)
+            hold = c[jj] < top
+        hit = tap & hold
+        out[jj[hit]] = True
+        alive &= ~tap                      # a tap that fails to hold also ends the zone
+    return out
+
+
+def _smc(ev: dict, nat: dict, t: pd.DatetimeIndex, o, h, l, c, a, valid, rc: ResearchConfig,
+         sessions: SessionsConfig) -> None:
+    """Smart-money-concept setups (all known at the candle close).
+
+    * ``swept Asia low / high``: after the Asia session (New York clock) has ended, the first
+      candle of the trading day that trades beyond the Asia low (high) and closes back inside.
+    * ``bullish / bearish FVG retest``: a fair value gap (candle 3 low above candle 1 high, at
+      least 0.25 ATR) is revisited within ``sweep_lookbacks[0]`` candles and the candle closes
+      without filling it completely.
+    * ``bullish / bearish OB retest``: the last opposite candle before an impulse candle (the
+      order block) is revisited within the same window and holds.
+    """
+    n = len(c)
+    window = int(min(rc.sweep_lookbacks))
+    labels = session_labels(t, sessions)
+    day = trading_day(t, sessions)
+    ny = t.tz_convert("America/New_York")
+    mins = np.asarray(ny.hour * 60 + ny.minute)
+    is_asia = labels == "asia"
+    df = pd.DataFrame({"day": day, "h": np.where(is_asia, h, np.nan), "l": np.where(is_asia, l, np.nan)})
+    ahi = df.groupby("day")["h"].transform("max").to_numpy()
+    alo = df.groupby("day")["l"].transform("min").to_numpy()
+    after = (~is_asia) & (mins < sessions.trading_day_start)          # 00:00-17:00 New York
+    lo_sw = valid & after & (l < alo) & (c > alo)
+    hi_sw = valid & after & (h > ahi) & (c < ahi)
+    # first sweep of the day only
+    first_lo = pd.Series(lo_sw).groupby(day).cumsum().to_numpy() == 1
+    first_hi = pd.Series(hi_sw).groupby(day).cumsum().to_numpy() == 1
+    ev["swept Asia low"], nat["swept Asia low"] = lo_sw & first_lo, 1
+    ev["swept Asia high"], nat["swept Asia high"] = hi_sw & first_hi, -1
+
+    k = np.arange(2, n)
+    min_gap = 0.25 * a[k]
+    bull = (l[k] - h[k - 2] >= min_gap) & valid[k]
+    bear = (l[k - 2] - h[k] >= min_gap) & valid[k]
+    ev["bullish FVG retest"] = valid & _first_tap(k[bull], l[k][bull], h[k - 2][bull], 1, h, l, c, window, n)
+    ev["bearish FVG retest"] = valid & _first_tap(k[bear], l[k - 2][bear], h[k][bear], -1, h, l, c, window, n)
+    nat["bullish FVG retest"], nat["bearish FVG retest"] = 1, -1
+
+    body = c - o
+    k = np.arange(1, n)
+    disp_up = (body[k] >= rc.impulse_body_atr * a[k]) & (body[k - 1] < 0) & valid[k]
+    disp_dn = (-body[k] >= rc.impulse_body_atr * a[k]) & (body[k - 1] > 0) & valid[k]
+    ev["bullish OB retest"] = valid & _first_tap(k[disp_up], h[k - 1][disp_up], l[k - 1][disp_up], 1, h, l, c, window, n)
+    ev["bearish OB retest"] = valid & _first_tap(k[disp_dn], h[k - 1][disp_dn], l[k - 1][disp_dn], -1, h, l, c, window, n)
+    nat["bullish OB retest"], nat["bearish OB retest"] = 1, -1
+
+
+PRICE_ACTION_FAMILIES = ("price action", "price action at levels", "smc")
 
 
 def event_family(name: str) -> str:
@@ -299,11 +373,13 @@ def event_family(name: str) -> str:
         return "time of day"
     if "news" in name or "NFP" in name:
         return "news shocks"
+    if any(k in name for k in ("Asia", "FVG", "OB retest", "prev-day")):
+        return "smc"
     if any(k in name for k in ("pin", "engulfing", "inside bar")):
         return "price action at levels" if " at " in name else "price action"
     if name.startswith("round "):
         return "round numbers"
-    if name.endswith(("d high", "d low")) or "prev-day" in name:
+    if name.endswith(("d high", "d low")):
         return "major support / resistance"
     if name.startswith(("impulse", "big move")):
         return "momentum"
