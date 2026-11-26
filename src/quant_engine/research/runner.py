@@ -39,11 +39,12 @@ def _table(df: pd.DataFrame, cols: list[str]) -> str:
         return "_none_\n"
     cols = [c for c in cols if c in df.columns]
     lines = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
-    for _, r in df[cols].iterrows():
+    for r in df[cols].itertuples(index=False):
         cells = []
-        for v in r.tolist():
-            if isinstance(v, float):
-                cells.append("" if np.isnan(v) else f"{v:.3g}")
+        for v in r:
+            if isinstance(v, (float, np.floating)):
+                v = float(v)
+                cells.append("" if np.isnan(v) else (f"{v:,.0f}" if abs(v) >= 1000 else f"{v:.3g}"))
             else:
                 cells.append(str(v))
         lines.append("| " + " | ".join(cells) + " |")

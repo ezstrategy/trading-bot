@@ -376,6 +376,10 @@ class ResearchConfig(BaseModel):
     news_spike_atr: float = Field(2.5, gt=0)
     timeframes: dict[str, dict] = Field(default_factory=dict)   # overrides per entry timeframe (H1, H4)
     only_families: list[str] | None = None   # test only these idea families (None = all)
+    exit_units: Literal["atr", "usd"] = "atr"   # usd: sl_atr / tp_atr are dollar distances
+    bigmoves: dict = Field(default_factory=lambda: {
+        "pip_usd": 0.10, "move_pips": [30, 50], "window_bars": 6,
+        "target_pips": [30, 50], "stop_pips": [20, 30, 50]})
 
     def for_timeframe(self, tf: str) -> "ResearchConfig":
         """These settings with the overrides for entry timeframe ``tf`` (e.g. H1) applied."""

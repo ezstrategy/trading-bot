@@ -162,6 +162,7 @@ def build_events(m5: pd.DataFrame, h4: pd.DataFrame, rc: ResearchConfig, session
     _levels_and_news(ev, nat, t, o, h, l, c, a, valid, rc, tf)
     _price_action(ev, nat, o, h, l, c, a, valid, rc, tf)
     _smc(ev, nat, t, o, h, l, c, a, valid, rc, sessions)
+    _setups(ev, nat, t, o, h, l, c, a, valid, rc, sessions, tf)
 
     for k in ev:
         ev[k] = np.nan_to_num(ev[k], nan=False).astype(bool)
@@ -364,11 +365,83 @@ def _smc(ev: dict, nat: dict, t: pd.DatetimeIndex, o, h, l, c, a, valid, rc: Res
     nat["bullish OB retest"], nat["bearish OB retest"] = 1, -1
 
 
-PRICE_ACTION_FAMILIES = ("price action", "price action at levels", "smc")
+SETUP_FAMILY = "S/R + price action + liquidity"
+
+
+def _setups(ev: dict, nat: dict, t: pd.DatetimeIndex, o, h, l, c, a, valid, rc: ResearchConfig,
+            sessions: SessionsConfig, tf: Timeframe = Timeframe.M5) -> None:
+    """The owner's simple combined setups (support/resistance + price action + liquidity).
+
+    Key levels: previous trading-day high/low, Asia session high/low (after Asia), the
+    shortest ``level_days`` high/low, and the nearest round number (smallest ``round_steps``).
+
+    * ``sweep + rejection at support`` (BUY idea): the candle trades below a key low level and
+      closes back above it with a rejection (pin bar, bullish engulfing, or close in the top 30%
+      of the candle). ``... at resistance`` is the mirror (SELL idea).
+    * ``break + retest of resistance`` (BUY idea): within the last 12 candles a close went above
+      a round number or the previous-day high; now price comes back to it (low within
+      ``level_touch_atr`` ATR) and closes above it. ``... of support`` is the mirror.
+    """
+    n = len(c)
+    bull_pin, bear_pin = _pins(o, h, l, c, a, rc)
+    po, pc = np.concatenate([[np.nan], o[:-1]]), np.concatenate([[np.nan], c[:-1]])
+    bull_eng = (c > o) & (pc < po) & (o <= pc) & (c >= po)
+    bear_eng = (c < o) & (pc > po) & (o >= pc) & (c <= po)
+    rng = np.where(h - l > 0, h - l, np.nan)
+    bull_rej = bull_pin | bull_eng | ((c - l) / rng >= 0.7)
+    bear_rej = bear_pin | bear_eng | ((h - c) / rng >= 0.7)
+
+    day = trading_day(t, sessions)
+    df = pd.DataFrame({"day": day, "h": h, "l": l})
+    daily = df.groupby("day").agg(h=("h", "max"), l=("l", "min")).shift(1)
+    pdh, pdl = daily["h"].reindex(day).to_numpy(), daily["l"].reindex(day).to_numpy()
+    labels = session_labels(t, sessions)
+    is_asia = labels == "asia"
+    ny = t.tz_convert("America/New_York")
+    after_asia = (~is_asia) & (np.asarray(ny.hour * 60 + ny.minute) < sessions.trading_day_start)
+    adf = pd.DataFrame({"day": day, "h": np.where(is_asia, h, np.nan), "l": np.where(is_asia, l, np.nan)})
+    ahi = np.where(after_asia, adf.groupby("day")["h"].transform("max").to_numpy(), np.nan)
+    alo = np.where(after_asia, adf.groupby("day")["l"].transform("min").to_numpy(), np.nan)
+    nd = min(rc.level_days) * (1440 // tf.minutes)
+    lo_n, hi_n = _prior_extreme(l, nd, "min"), _prior_extreme(h, nd, "max")
+    step = min(rc.round_steps)
+    rnd_lo = np.ceil(l / step) * step           # round number inside the candle's lower part
+    rnd_hi = np.floor(h / step) * step
+
+    def swept_below(level):
+        return (l < level) & (c > level)
+
+    def swept_above(level):
+        return (h > level) & (c < level)
+
+    sup = swept_below(pdl) | swept_below(alo) | swept_below(lo_n) | ((rnd_lo < np.minimum(o, c)) & (rnd_lo > l))
+    res = swept_above(pdh) | swept_above(ahi) | swept_above(hi_n) | ((rnd_hi > np.maximum(o, c)) & (rnd_hi < h))
+    ev["sweep + rejection at support"], nat["sweep + rejection at support"] = valid & sup & bull_rej, 1
+    ev["sweep + rejection at resistance"], nat["sweep + rejection at resistance"] = valid & res & bear_rej, -1
+
+    # break + retest: remember the last level broken in the last 12 candles
+    tol = rc.level_touch_atr * a
+    prev_c = np.concatenate([[np.nan], c[:-1]])
+    up_rnd = np.where(np.floor(c / step) > np.floor(prev_c / step), np.floor(c / step) * step, np.nan)
+    dn_rnd = np.where(np.floor(c / step) < np.floor(prev_c / step), np.ceil(c / step) * step, np.nan)
+    up_pdh = np.where((c > pdh) & ~(prev_c > pdh), pdh, np.nan)
+    dn_pdl = np.where((c < pdl) & ~(prev_c < pdl), pdl, np.nan)
+    up_lvl = pd.Series(np.where(np.isnan(up_pdh), up_rnd, up_pdh)).shift(1).ffill(limit=11).to_numpy()
+    dn_lvl = pd.Series(np.where(np.isnan(dn_pdl), dn_rnd, dn_pdl)).shift(1).ffill(limit=11).to_numpy()
+    ev["break + retest of resistance"] = valid & (l <= up_lvl + tol) & (c > up_lvl)
+    nat["break + retest of resistance"] = 1
+    ev["break + retest of support"] = valid & (h >= dn_lvl - tol) & (c < dn_lvl)
+    nat["break + retest of support"] = -1
+    _ = n
+
+
+PRICE_ACTION_FAMILIES = ("price action", "price action at levels", "smc", SETUP_FAMILY)
 
 
 def event_family(name: str) -> str:
     """Group an event name into an idea family (for the report)."""
+    if name.startswith(("sweep + rejection", "break + retest")):
+        return SETUP_FAMILY
     if name.startswith("hour "):
         return "time of day"
     if "news" in name or "NFP" in name:

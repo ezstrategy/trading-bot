@@ -11,6 +11,7 @@
     python -m quant_engine dukascopy --start 2026-05-01 [--end 2026-11-24]   (free history, no MT5)
     python -m quant_engine backtest [--source mt5|dukascopy] [--mode regime|v1|bullish|bearish|sideways|compare]
     python -m quant_engine patterns [--source mt5|dukascopy] [--timeframe M5|H1|H4]   (find repeatable patterns)
+    python -m quant_engine bigmoves [--start 2020-01-01]   (30-50 pip moves in 30 min: causes + strategy test)
     python -m quant_engine run [--dry-run] [--once]      (live signals to Telegram; never trades)
     python -m quant_engine news                           (refresh the economic calendar, show blocks)
     python -m quant_engine telegram-test                  (send a test message)
@@ -95,6 +96,12 @@ def build_parser() -> argparse.ArgumentParser:
     pt.add_argument("--price-action", action="store_true",
                     help="test only price-action setups (pin bars, engulfing, inside bars, at levels or not)")
     pt.add_argument("--out", help="report folder (default reports/patterns_<source>_<timeframe>_<time>)")
+    bg = sub.add_parser("bigmoves", help="big fast moves: what comes before them + a simple strategy test")
+    bg.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    bg.add_argument("--start", default="2020-01-01")
+    bg.add_argument("--end")
+    bg.add_argument("--point", type=float, default=0.01)
+    bg.add_argument("--out")
     rn = sub.add_parser("run", help="live signal engine: watch MT5, send signals to Telegram (never trades)")
     rn.add_argument("--dry-run", action="store_true", help="print messages instead of sending to Telegram")
     rn.add_argument("--once", action="store_true", help="run one cycle and exit")
@@ -277,6 +284,21 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
         return _dukascopy(cfg, store, canonical, args, fetch)
     if args.cmd == "backtest":
         return _backtest(cfg, store, canonical, args)
+    if args.cmd == "bigmoves":
+        from .research.bigmoves import run_bigmoves
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/bigmoves_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        try:
+            summary = run_bigmoves(cfg, store, ds, args.point, out,
+                                   pd.Timestamp(args.start, tz="UTC") if args.start else None,
+                                   pd.Timestamp(args.end, tz="UTC") if args.end else None,
+                                   f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)")
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2, default=str))
+        print(f"Report: {out}/report.md")
+        return 0
     if args.cmd == "patterns":
         return _patterns(cfg, store, canonical, args)
     if args.cmd == "news":

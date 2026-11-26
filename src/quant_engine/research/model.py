@@ -56,7 +56,8 @@ class PatternModel(EntryModel):
         sent on the M5 candle that closes together with that candle and managed on M5."""
         super().__init__(features, cfg, news)
         self.tf = tf = Timeframe.parse(timeframe)
-        self.patterns = [{k: p[k] for k in PATTERN_KEYS} | {"label": p.get("description", p["event"])}
+        self.patterns = [{k: p[k] for k in PATTERN_KEYS} | {"label": p.get("description", p["event"]),
+                                                            "exit_units": p.get("exit_units", "atr")}
                          for p in (patterns or [])]
         self.et = build_events(features.bars[tf], features.bars[Timeframe.H4], cfg.research.for_timeframe(tf.value),
                                cfg.sessions, features.point, cfg.backtest.assumed_spread_points,
@@ -93,6 +94,8 @@ class PatternModel(EntryModel):
             if not m[k]:
                 continue
             a, sp, d = float(self.et.atr[k]), float(self.et.spread[k]), int(p["direction"])
+            if p.get("exit_units") == "usd":      # stop / target given in dollars
+                a = 1.0
             if not a > 0:
                 return self._reject("no ATR yet")
             entry = float(self.et.c[k]) + (sp if d == 1 else 0.0)

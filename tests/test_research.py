@@ -378,3 +378,40 @@ def test_smc_asia_sweep_after_asia_only(planted):
     day = pd.Series(hit).groupby(np.asarray(et.times.tz_convert("America/New_York").date)).sum()
     assert day.max() <= 2                                           # first sweep per trading day
     assert event_family("swept Asia low") == event_family("bullish FVG retest") == "smc"
+
+
+# ------------------------------------------------------------------ big fast moves + simple setups
+def test_sweep_rejection_and_break_retest_setups():
+    m5 = _m5([(4003, 4004, 3998, 4003.5),    # sweeps below 4000 and closes at the top: rejection at support
+              (4003.5, 4012, 4003, 4011),
+              (4011, 4052, 4010, 4051),       # closes above 4050: breaks a round number
+              (4051, 4053, 4049.9, 4052)])    # back to 4050 and closes above: break + retest
+    et = _ev(m5)
+    k = 30
+    assert et.events["sweep + rejection at support"][k]
+    assert et.events["break + retest of resistance"][k + 3]
+    assert not et.events["break + retest of resistance"][k + 1]
+
+
+def test_forward_moves_measure_from_next_open():
+    from quant_engine.research.bigmoves import forward_moves
+    m5 = _m5([(4010, 4011, 4009, 4010), (4010, 4014, 4009, 4013), (4013, 4013.5, 4006, 4007)] + [(4007,) * 4] * 8)
+    et = _ev(m5)
+    up, dn = forward_moves(et, 6)
+    k = 30
+    assert up[k] == pytest.approx(4014 - 4010) and dn[k] == pytest.approx(4010 - 4006)
+
+
+def test_bigmoves_cli_reports_win_rate_and_breakeven(config_dir, tmp_path, monkeypatch, planted):
+    monkeypatch.chdir(tmp_path)
+    store = ParquetStore(tmp_path / "data")
+    for tf in TFS:
+        store.write_bars("XAUUSD", tf, planted[tf])
+    rep = tmp_path / "bm"
+    assert cli.run(["--config", str(config_dir), "bigmoves", "--start", "2026-06-01", "--out", str(rep)]) == 0
+    md = (rep / "report.md").read_text()
+    assert "1 pip = $0.1" in md and "breakeven_win_pct" in md and "What came before a 30-pip move" in md
+    assert "| 2026 |" in md
+    cand = pd.read_csv(rep / "strategy_candidates.csv")
+    assert set(cand["exit_units"]) == {"usd"} and set(cand["horizon"]) == {6}
+    assert set(cand["family"]) == {"S/R + price action + liquidity"}

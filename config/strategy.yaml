@@ -164,3 +164,9 @@ research:
       sweep_lookbacks: [6, 30]    # last 1 day / 5 days
       move_bars: 3
       range_bars: 12
+  bigmoves:                  # python -m quant_engine bigmoves (30-50 pip moves within 30 minutes)
+    pip_usd: 0.10            # gold: 1 pip = $0.10, so 30 pips = $3
+    move_pips: [30, 50]
+    window_bars: 6           # 6 M5 candles = 30 minutes
+    target_pips: [30, 50]
+    stop_pips: [20, 30, 50]
