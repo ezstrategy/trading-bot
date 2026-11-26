@@ -259,3 +259,61 @@ def test_report_has_family_luck_table(planted_result):
     assert fam["candidates"].sum() == len(res.tested)
     assert np.allclose(fam["expected_by_luck"], (fam["candidates"] * 0.05).round(1))
     assert fam.set_index("family").loc["time of day", "p_below_0.05"] >= 1     # the planted hour
+
+
+# ------------------------------------------------------------------ H1 / H4 swing versions
+def _repo_cfg():
+    import yaml
+    from pathlib import Path
+    return StrategyConfig(**yaml.safe_load((Path(__file__).resolve().parents[1] / "config" / "strategy.yaml").read_text()))
+
+
+def test_timeframe_overrides_apply():
+    rc = _repo_cfg().research
+    h1 = rc.for_timeframe("H1")
+    assert h1.horizons == [8, 24] and 3.0 in h1.tp_atr and h1.fixed_spread_points == rc.fixed_spread_points
+    assert rc.for_timeframe("M5") is rc
+
+
+def test_h1_events_use_no_future_candles(planted):
+    cfg = _repo_cfg()
+    rc = cfg.research.for_timeframe("H1")
+    h1, h4 = planted[Timeframe.H1], planted[Timeframe.H4]
+    cut = h1["time"].iat[len(h1) // 2] + Timeframe.H1.delta
+    full = build_events(h1, h4, rc, cfg.sessions, 0.01, 30, regime_kwargs(cfg), Timeframe.H1)
+    part = build_events(h1[h1["time"] + Timeframe.H1.delta <= cut], h4[h4["time"] + Timeframe.H4.delta <= cut],
+                        rc, cfg.sessions, 0.01, 30, regime_kwargs(cfg), Timeframe.H1)
+    n = len(part.c)
+    for name, mask in part.events.items():
+        assert (full.events[name][:n] == mask).all(), name
+    assert "swept 24h low" in full.events and full.tf == Timeframe.H1
+
+
+def test_h1_patterns_found_and_traded_on_m5_at_h1_closes(planted):
+    cfg = _repo_cfg()
+    rc = cfg.research.for_timeframe("H1")
+    et = build_events(planted[Timeframe.H1], planted[Timeframe.H4], rc, cfg.sessions, 0.01, 30,
+                      regime_kwargs(cfg), Timeframe.H1)
+    res = mine(et, rc)
+    assert (res.survivors["verdict"] == "confirmed").any()
+    assert (res.tested["timeframe"] == "H1").all()
+    pats = json.loads(res.survivors.to_json(orient="records"))
+    f = MarketFeatures(planted, cfg, 0.01)
+    model = PatternModel(f, cfg, None, patterns=pats, start=res.split_time, timeframe="H1")
+    trades = Backtester(f, cfg, None, model=model).run()
+    filled = trades[trades["filled"]]
+    assert len(filled) >= 10 and filled["r"].mean() > 0
+    st = pd.to_datetime(trades["signal_time"])
+    assert (st.dt.minute == 0).all() and (st >= res.split_time).all()   # sent when the H1 candle closes
+
+
+def test_patterns_cli_h4(config_dir, tmp_path, monkeypatch, planted):
+    monkeypatch.chdir(tmp_path)
+    store = ParquetStore(tmp_path / "data")
+    for tf in TFS:
+        store.write_bars("XAUUSD", tf, planted[tf])
+    rep = tmp_path / "rep4"
+    assert cli.run(["--config", str(config_dir), "patterns", "--timeframe", "H4", "--out", str(rep)]) == 0
+    md = (rep / "report.md").read_text()
+    assert "pattern timeframe**: H4 (swing trades" in md and "H4 candles" in md
+    assert json.loads((rep / "patterns.json").read_text())["timeframe"] == "H4"

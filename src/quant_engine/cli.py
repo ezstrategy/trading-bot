@@ -10,7 +10,7 @@
     python -m quant_engine dashboard [--port 8501]
     python -m quant_engine dukascopy --start 2026-05-01 [--end 2026-11-24]   (free history, no MT5)
     python -m quant_engine backtest [--source mt5|dukascopy] [--mode regime|v1|bullish|bearish|sideways|compare]
-    python -m quant_engine patterns [--source mt5|dukascopy]   (find repeatable patterns per market type)
+    python -m quant_engine patterns [--source mt5|dukascopy] [--timeframe M5|H1|H4]   (find repeatable patterns)
     python -m quant_engine run [--dry-run] [--once]      (live signals to Telegram; never trades)
     python -m quant_engine news                           (refresh the economic calendar, show blocks)
     python -m quant_engine telegram-test                  (send a test message)
@@ -90,7 +90,9 @@ def build_parser() -> argparse.ArgumentParser:
     pt.add_argument("--start")
     pt.add_argument("--end")
     pt.add_argument("--point", type=float, default=0.01, help="tick size (XAUUSD: 0.01)")
-    pt.add_argument("--out", help="report folder (default reports/patterns_<source>_<time>)")
+    pt.add_argument("--timeframe", choices=["M5", "H1", "H4"], default="M5",
+                    help="M5 = scalps; H1 / H4 = swing trades with bigger stops and targets")
+    pt.add_argument("--out", help="report folder (default reports/patterns_<source>_<timeframe>_<time>)")
     rn = sub.add_parser("run", help="live signal engine: watch MT5, send signals to Telegram (never trades)")
     rn.add_argument("--dry-run", action="store_true", help="print messages instead of sending to Telegram")
     rn.add_argument("--once", action="store_true", help="run one cycle and exit")
@@ -189,9 +191,9 @@ def _patterns(cfg, store: ParquetStore, canonical: str, args: argparse.Namespace
             if args.source == "dukascopy" else f"MT5 broker bars for {canonical} (UTC)")
     start = pd.Timestamp(args.start, tz="UTC") if args.start else None
     end = pd.Timestamp(args.end, tz="UTC") if args.end else None
-    out = args.out or f"reports/patterns_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+    out = args.out or f"reports/patterns_{args.source}_{args.timeframe}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
     try:
-        summary = run_patterns(cfg, store, ds, args.point, out, start, end, note)
+        summary = run_patterns(cfg, store, ds, args.point, out, start, end, note, timeframe=args.timeframe)
     except ValueError as exc:
         hint = "python -m quant_engine dukascopy --days 365" if args.source == "dukascopy" \
             else "python -m quant_engine download --days 365"

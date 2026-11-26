@@ -374,6 +374,12 @@ class ResearchConfig(BaseModel):
     level_touch_atr: float = Field(0.25, ge=0)
     news_times_ny: list[str] = Field(default_factory=lambda: ["08:30", "10:00", "14:00"])
     news_spike_atr: float = Field(2.5, gt=0)
+    timeframes: dict[str, dict] = Field(default_factory=dict)   # overrides per entry timeframe (H1, H4)
+
+    def for_timeframe(self, tf: str) -> "ResearchConfig":
+        """These settings with the overrides for entry timeframe ``tf`` (e.g. H1) applied."""
+        extra = self.timeframes.get(str(tf).upper(), {})
+        return ResearchConfig(**{**self.model_dump(), **extra}) if extra else self
 
     @field_validator("sl_atr", "tp_atr", "horizons", "sweep_lookbacks", "round_steps", "level_days")
     @classmethod

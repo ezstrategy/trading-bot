@@ -151,3 +151,16 @@ research:
   level_touch_atr: 0.25      # "at a level" = within 0.25 ATR of it
   news_times_ny: ["08:30", "10:00", "14:00"]   # US data / FOMC release times (New York clock)
   news_spike_atr: 2.5        # news shock: the release candle is >= 2.5 ATR long
+  timeframes:                # swing versions: python -m quant_engine patterns --timeframe H1 (or H4)
+    H1:                      # counts are H1 candles; ATR = ATR(14) on H1
+      tp_atr: [1.0, 2.0, 3.0]
+      horizons: [8, 24]      # hold up to 8 h / 1 day
+      sweep_lookbacks: [24, 72]   # last 1 day / 3 days
+      move_bars: 6
+      range_bars: 24
+    H4:                      # counts are H4 candles; ATR = ATR(14) on H4
+      tp_atr: [1.0, 2.0, 3.0]
+      horizons: [6, 18]      # hold up to 1 day / 3 days
+      sweep_lookbacks: [6, 30]    # last 1 day / 5 days
+      move_bars: 3
+      range_bars: 12

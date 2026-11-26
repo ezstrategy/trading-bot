@@ -50,12 +50,14 @@ class EventTable:
     events: dict[str, np.ndarray]  # event name -> bool mask
     natural: dict[str, int]        # event name -> +1 bullish-looking, -1 bearish-looking
     hour_events: frozenset[str]    # events that already are a time of day (no session split)
+    tf: Timeframe = Timeframe.M5   # timeframe of the candles (entry timeframe)
 
 
-def regime_per_bar(m5_times: pd.DatetimeIndex, h4: pd.DataFrame, regimes: pd.Series) -> np.ndarray:
-    """H4 regime of the last H4 candle closed at each M5 candle's close (no look-ahead)."""
+def regime_per_bar(m5_times: pd.DatetimeIndex, h4: pd.DataFrame, regimes: pd.Series,
+                   tf: Timeframe = Timeframe.M5) -> np.ndarray:
+    """H4 regime of the last H4 candle closed at each candle's close (no look-ahead)."""
     closes = pd.DatetimeIndex(h4["time"]) + Timeframe.H4.delta
-    decision = m5_times + Timeframe.M5.delta
+    decision = m5_times + tf.delta
     k = closes.searchsorted(decision, side="right") - 1
     reg = regimes.to_numpy(dtype=object)
     return np.where(k >= 0, reg[np.clip(k, 0, None)], "neutral").astype(object)
@@ -74,9 +76,11 @@ def _first(mask: np.ndarray) -> np.ndarray:
 
 
 def build_events(m5: pd.DataFrame, h4: pd.DataFrame, rc: ResearchConfig, sessions: SessionsConfig,
-                 point: float, assumed_spread_points: float, regime_kw: dict | None = None) -> EventTable:
-    """Detect every event on ``m5`` (bars with open times in UTC). ``regime_kw`` are the
-    :func:`trend_regime_series` settings (default: the backtest's)."""
+                 point: float, assumed_spread_points: float, regime_kw: dict | None = None,
+                 tf: Timeframe = Timeframe.M5) -> EventTable:
+    """Detect every event on ``m5`` (bars with open times in UTC; despite the name they can be
+    H1 or H4 candles when ``tf`` says so). ``regime_kw`` are the :func:`trend_regime_series`
+    settings (default: the backtest's). Lookbacks in ``rc`` are counted in ``tf`` candles."""
     t = pd.DatetimeIndex(m5["time"])
     o, h, l, c = (m5[k].to_numpy(dtype="float64") for k in ("open", "high", "low", "close"))
     sp_pts = m5["spread"].to_numpy(dtype="float64") if "spread" in m5 else np.full(len(c), np.nan)
@@ -90,7 +94,7 @@ def build_events(m5: pd.DataFrame, h4: pd.DataFrame, rc: ResearchConfig, session
     valid = ~np.isnan(a) & (a > 0)
 
     # time of day: the candle that closes at HH:00 UTC
-    close_hour = (t + Timeframe.M5.delta)
+    close_hour = (t + tf.delta)
     on_hour = np.asarray(close_hour.minute == 0)
     hrs = np.asarray(close_hour.hour)
     hour_names = []
@@ -102,7 +106,7 @@ def build_events(m5: pd.DataFrame, h4: pd.DataFrame, rc: ResearchConfig, session
 
     # liquidity sweeps and closed breakouts of the last N hours
     for n in rc.sweep_lookbacks:
-        hrs_lbl = f"{n * 5 / 60:g}h"
+        hrs_lbl = f"{n * tf.minutes / 60:g}h"
         lo, hi = _prior_extreme(l, n, "min"), _prior_extreme(h, n, "max")
         ev[f"swept {hrs_lbl} low"] = valid & (l < lo) & (c > lo)
         nat[f"swept {hrs_lbl} low"] = 1
@@ -155,14 +159,14 @@ def build_events(m5: pd.DataFrame, h4: pd.DataFrame, rc: ResearchConfig, session
     ev["range bottom touch"] = ok & (l <= rlo + rc.range_edge * width) & (l >= rlo)
     nat["range bottom touch"] = 1
 
-    _levels_and_news(ev, nat, t, o, h, l, c, a, valid, rc)
+    _levels_and_news(ev, nat, t, o, h, l, c, a, valid, rc, tf)
 
     for k in ev:
         ev[k] = np.nan_to_num(ev[k], nan=False).astype(bool)
     return EventTable(times=t, o=o, h=h, l=l, c=c, spread=sp_pts * point, atr=a,
-                      regime=regime_per_bar(t, h4, regimes), session=session_labels(t, sessions),
+                      regime=regime_per_bar(t, h4, regimes, tf), session=session_labels(t, sessions),
                       blocked=new_signals_blocked(t, sessions), events=ev, natural=nat,
-                      hour_events=frozenset(hour_names))
+                      hour_events=frozenset(hour_names), tf=tf)
 
 
 def _pins(o, h, l, c, a, rc: ResearchConfig) -> tuple[np.ndarray, np.ndarray]:
@@ -175,7 +179,8 @@ def _pins(o, h, l, c, a, rc: ResearchConfig) -> tuple[np.ndarray, np.ndarray]:
     return big & (lower >= rc.pin_wick_ratio), big & (upper >= rc.pin_wick_ratio)
 
 
-def _levels_and_news(ev: dict, nat: dict, t: pd.DatetimeIndex, o, h, l, c, a, valid, rc: ResearchConfig) -> None:
+def _levels_and_news(ev: dict, nat: dict, t: pd.DatetimeIndex, o, h, l, c, a, valid, rc: ResearchConfig,
+                     tf: Timeframe = Timeframe.M5) -> None:
     """Major support / resistance, round numbers, price action at them, and news shocks.
 
     * ``round N support / resistance``: the candle wicks through a multiple of N USD and
@@ -185,7 +190,7 @@ def _levels_and_news(ev: dict, nat: dict, t: pd.DatetimeIndex, o, h, l, c, a, va
     * ``swept / broke Nd high / low``: the N-day high or low (major S/R) is swept and
       rejected, or closed through. ``bullish / bearish pin at Nd low / high``: a pin bar
       within ``level_touch_atr`` of that level.
-    * ``news spike up / down``: the M5 candle opening at a US release time (New York clock)
+    * ``news spike up / down``: the candle containing a US release time (New York clock)
       is >= ``news_spike_atr`` x the previous ATR. ``NFP spike up / down``: the same on the
       first Friday of the month at 08:30 New York.
     """
@@ -210,7 +215,7 @@ def _levels_and_news(ev: dict, nat: dict, t: pd.DatetimeIndex, o, h, l, c, a, va
             ev["bullish pin at round"], nat["bullish pin at round"] = valid & bull_pin & touch_lo, 1
             ev["bearish pin at round"], nat["bearish pin at round"] = valid & bear_pin & touch_hi, -1
 
-    bars_per_day = 288
+    bars_per_day = 1440 // tf.minutes
     for days in rc.level_days:
         n = days * bars_per_day
         lo, hi = _prior_extreme(l, n, "min"), _prior_extreme(h, n, "max")
@@ -230,12 +235,13 @@ def _levels_and_news(ev: dict, nat: dict, t: pd.DatetimeIndex, o, h, l, c, a, va
     release = np.zeros(len(c), dtype=bool)
     for hhmm in rc.news_times_ny:
         hh, mm = (int(x) for x in hhmm.split(":"))
-        release |= mins == hh * 60 + mm
+        rel = hh * 60 + mm
+        release |= (mins <= rel) & (rel < mins + tf.minutes)
     prev_atr = np.concatenate([[np.nan], a[:-1]])
     shock = valid & release & ((h - l) >= rc.news_spike_atr * prev_atr)
     ev["news spike up"], nat["news spike up"] = shock & (c > o), 1
     ev["news spike down"], nat["news spike down"] = shock & (c < o), -1
-    nfp = valid & (np.asarray(ny.weekday) == 4) & (np.asarray(ny.day) <= 7) & (mins == 8 * 60 + 30)
+    nfp = valid & (np.asarray(ny.weekday) == 4) & (np.asarray(ny.day) <= 7) & (mins <= 510) & (510 < mins + tf.minutes)
     ev["NFP spike up"], nat["NFP spike up"] = nfp & (c > o), 1
     ev["NFP spike down"], nat["NFP spike down"] = nfp & (c < o), -1
 

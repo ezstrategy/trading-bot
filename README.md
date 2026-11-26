@@ -134,6 +134,9 @@ python -m quant_engine patterns --source mt5      # report in reports/patterns_m
   filter across all candidates, a minimum edge after spread and a stability check.
 - Checked on the newer 40% it never saw: `confirmed`, `held up (not proven)`, `failed`.
   All discovery survivors also run through the normal backtester on that unseen period.
+- Swing version: `patterns --timeframe H1` or `--timeframe H4` finds the same ideas on H1/H4
+  candles with bigger stops and targets (H1/H4 ATR) and holds up to 1-3 days (`research.timeframes`).
+  Signals are still sent on the M5 candle that closes with the H1/H4 candle.
 - Surviving patterns are saved to `reports/patterns_latest.json`; `strategy.mode: patterns`
   (or `backtest --mode patterns`) signals from the `confirmed` ones. Signals only.
 

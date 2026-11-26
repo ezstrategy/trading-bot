@@ -130,25 +130,28 @@ def write_report(res: MiningResult, meta: dict, holdout: dict, out: Path) -> str
 
 def run_patterns(cfg: AppConfig, store: ParquetStore, dataset: str, point: float, out_dir: str | Path,
                  start: pd.Timestamp | None = None, end: pd.Timestamp | None = None,
-                 source_note: str = "", backtest: bool = True) -> dict:
-    """Mine ``dataset`` and write the report files into ``out_dir``. Returns a summary dict."""
+                 source_note: str = "", backtest: bool = True, timeframe: str = "M5") -> dict:
+    """Mine ``dataset`` on ``timeframe`` candles (M5 scalps, or H1 / H4 swings) and write the
+    report files into ``out_dir``. Returns a summary dict."""
     sc = cfg.strategy
-    rc = sc.research
+    tf = Timeframe.parse(timeframe)
+    rc = sc.research.for_timeframe(tf.value)
     bars = {tf: store.read_bars(dataset, tf, start, end) for tf in STRUCTURE_TFS}
     missing = [tf.value for tf, b in bars.items() if b.empty]
     if missing:
         raise ValueError(f"No stored {dataset} data for {', '.join(missing)}")
     m5 = bars[Timeframe.M5]
-    quality = validate_bars(m5, Timeframe.M5, cfg.data.quality, dataset=f"{dataset} M5")
-    et = build_events(m5, bars[Timeframe.H4], sc.research, sc.sessions, point,
-                      sc.backtest.assumed_spread_points, regime_kwargs(sc))
-    res = mine(et, sc.research)
+    entry = bars[tf]
+    quality = validate_bars(entry, tf, cfg.data.quality, dataset=f"{dataset} {tf.value}")
+    et = build_events(entry, bars[Timeframe.H4], rc, sc.sessions, point,
+                      sc.backtest.assumed_spread_points, regime_kwargs(sc), tf)
+    res = mine(et, rc)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     res.tested.to_csv(out / "all_candidates.csv", index=False)
     res.survivors.to_csv(out / "patterns.csv", index=False)
     pats = [] if res.survivors.empty else json.loads(res.survivors.to_json(orient="records"))
-    payload = {"made": pd.Timestamp.now(tz="UTC").isoformat(), "data": source_note or dataset,
+    payload = {"made": pd.Timestamp.now(tz="UTC").isoformat(), "data": source_note or dataset, "timeframe": tf.value,
                "split_time": res.split_time.isoformat(), "patterns": pats}
     (out / "patterns.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     pf = Path(rc.patterns_file)
@@ -158,7 +161,7 @@ def run_patterns(cfg: AppConfig, store: ParquetStore, dataset: str, point: float
     holdout: dict = {}
     if backtest and pats:
         features = MarketFeatures(bars, sc, point)
-        model = PatternModel(features, sc, None, patterns=pats, start=res.split_time)
+        model = PatternModel(features, sc, None, patterns=pats, start=res.split_time, timeframe=tf)
         trades = Backtester(features, sc, None, model=model).run()
         trades.to_csv(out / "holdout_trades.csv", index=False)
         holdout = report.stats(trades, sc.backtest.risk_pct)
@@ -172,14 +175,17 @@ def run_patterns(cfg: AppConfig, store: ParquetStore, dataset: str, point: float
         "period (UTC)": f"{m5['time'].iat[0]:%Y-%m-%d} to {m5['time'].iat[-1] + Timeframe.M5.delta:%Y-%m-%d}",
         "discovery / unseen split": f"older {rc.discover_frac:.0%} / newer {1 - rc.discover_frac:.0%} "
                                     f"(unseen from {res.split_time:%Y-%m-%d %H:%M} UTC)",
-        "M5 candles": f"{len(m5):,}",
+        "pattern timeframe": (f"{tf.value} (swing trades: stops/targets in {tf.value} ATR, "
+                              f"held up to {max(rc.horizons) * tf.minutes / 60:g} h)" if tf != Timeframe.M5
+                              else "M5 (scalps)"),
+        f"{tf.value} candles": f"{len(entry):,}",
         "time in each market (H4)": ", ".join(f"{k} {v:.0%}" for k, v in regime_share.items()),
-        "M5 data quality issues": quality.counts() or "none",
+        f"{tf.value} data quality issues": quality.counts() or "none",
         "spread": (f"fixed {rc.fixed_spread_points:g} points in every year" if rc.fixed_spread_points is not None
                    else f"from the bars ({sc.backtest.assumed_spread_points:g} points when missing)"),
     }
     write_report(res, meta, holdout, out)
-    summary = {"tested": res.n_tests, "passed_discovery": int(len(res.survivors)),
+    summary = {"timeframe": tf.value, "tested": res.n_tests, "passed_discovery": int(len(res.survivors)),
                "verdicts": res.survivors["verdict"].value_counts().to_dict() if len(res.survivors) else {},
                "holdout_backtest": holdout, "report": str(out / "report.md"), "patterns_file": str(pf)}
     log.info("patterns_done", extra={"dataset": dataset, **{k: v for k, v in summary.items() if k != "holdout_backtest"}})

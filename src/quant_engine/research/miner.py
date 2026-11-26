@@ -53,12 +53,12 @@ class Pattern:
     def side(self) -> str:
         return "BUY" if self.direction == 1 else "SELL"
 
-    def describe(self, natural: int) -> str:
+    def describe(self, natural: int, tf_minutes: int = 5) -> str:
         """Plain-language description."""
         style = "continuation" if self.direction == natural else "reversal"
         when = "" if self.session == "any" else f" during {SESSION_NAMES.get(self.session, self.session)}"
         return (f"{self.regime} market: {self.side} after '{self.event}'{when} ({style}); "
-                f"stop {self.sl_atr:g} ATR, target {self.tp_atr:g} ATR, max {self.horizon * 5} min")
+                f"stop {self.sl_atr:g} ATR, target {self.tp_atr:g} ATR, max {self.horizon * tf_minutes / 60:g} h")
 
 
 def t_stats(r: np.ndarray) -> dict:
@@ -127,7 +127,7 @@ def mine(et: EventTable, rc: ResearchConfig) -> MiningResult:
     split = int(n * rc.discover_frac)
     thirds = np.linspace(0, split, 4).astype(int)
     exits = [(d, sl, tp, hz) for d in (1, -1) for sl in rc.sl_atr for tp in rc.tp_atr for hz in rc.horizons]
-    outcomes = {k: trade_outcomes(et.times, et.o, et.h, et.l, et.c, et.spread, et.atr, *k) for k in exits}
+    outcomes = {k: trade_outcomes(et.times, et.o, et.h, et.l, et.c, et.spread, et.atr, *k, tf=et.tf) for k in exits}
     rows, trade_sets = [], {}
     for name, reg, sess, m in _conditions(et):
         idx = np.nonzero(m)[0]
@@ -157,7 +157,8 @@ def mine(et: EventTable, rc: ResearchConfig) -> MiningResult:
                           & (tested["positive_thirds"] >= rc.min_stable_thirds))
     tested = tested.sort_values("t", ascending=False).reset_index(drop=True)
     tested["family"] = tested["event"].map(event_family)
-    tested["description"] = [Pattern(*r[:7]).describe(r[7]) for r in tested[
+    tested["timeframe"] = et.tf.value
+    tested["description"] = [Pattern(*r[:7]).describe(r[7], et.tf.minutes) for r in tested[
         ["event", "regime", "session", "direction", "sl_atr", "tp_atr", "horizon", "natural"]].itertuples(index=False)]
 
     surv = tested[tested["survives"]].drop_duplicates(["event", "regime", "session", "direction"])

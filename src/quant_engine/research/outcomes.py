@@ -8,7 +8,8 @@ so the mined numbers and the backtest agree):
 * Stop ``sl`` x ATR(14, M5) and target ``tp`` x ATR away from the entry.
 * Candles ``j+1 .. j+horizon`` are checked; the stop is checked before the target on
   every candle (conservative). Not done by then: closed at the last candle's close.
-* Trades that would span a gap longer than 3 hours (weekend, outage) are left out.
+* Trades that would span a gap longer than 3 hours (weekend, outage) are left out on M5;
+  H1/H4 swing trades may be held over a weekend (gap up to 56 hours).
 
 Result: R per candle (``nan`` when no trade is possible) and the index of the exit candle.
 """
@@ -20,11 +21,12 @@ import pandas as pd
 from ..timeframes import Timeframe
 
 MAX_GAP = pd.Timedelta(hours=3)
+SWING_MAX_GAP = pd.Timedelta(hours=56)   # H1/H4 swing trades may be held over a weekend
 
 
 def trade_outcomes(times: pd.DatetimeIndex, o: np.ndarray, h: np.ndarray, l: np.ndarray, c: np.ndarray,
                    spread: np.ndarray, atr: np.ndarray, direction: int, sl_atr: float, tp_atr: float,
-                   horizon: int) -> tuple[np.ndarray, np.ndarray]:
+                   horizon: int, tf: Timeframe = Timeframe.M5) -> tuple[np.ndarray, np.ndarray]:
     """Vectorised outcome of a trade started after every candle (see module docs)."""
     n = len(c)
     r = np.full(n, np.nan)
@@ -40,7 +42,8 @@ def trade_outcomes(times: pd.DatetimeIndex, o: np.ndarray, h: np.ndarray, l: np.
     tp = entry + direction * tp_atr * atr[j]
     tv = times.to_numpy()
     span = tv[j + horizon] - tv[j]
-    ok = (~np.isnan(risk)) & (risk > 0) & (span <= (horizon * Timeframe.M5.delta + MAX_GAP).to_timedelta64())
+    gap = MAX_GAP if tf.minutes < 60 else SWING_MAX_GAP
+    ok = (~np.isnan(risk)) & (risk > 0) & (span <= (horizon * tf.delta + gap).to_timedelta64())
     done = ~ok
     res = np.full(m, np.nan)
     ex = np.full(m, -1, dtype=np.int64)
