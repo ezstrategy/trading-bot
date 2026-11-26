@@ -489,4 +489,35 @@ def test_entries_cli_report_and_examples(config_dir, tmp_path, monkeypatch, plan
     sigs = pd.read_csv(rep / "signals.csv")
     assert len(sigs) > 0 and set(sigs["side"]) <= {"BUY", "SELL"}
     cand = pd.read_csv(rep / "candidates.csv")
-    assert set(cand["target_r"]) <= {1.0, 2.0, 3.0} and set(cand["filter"]) <= {"any", "flush", "with trend"}
+    assert set(cand["target_r"]) <= {1.0, 2.0, 3.0} and set(cand["filter"]) <= {"any", "flush", "with trend", "vwap band sweep", "vwap reclaim", "with vwap", "discount"}
+
+
+def test_daily_vwap_resets_each_trading_day_and_uses_only_past_candles():
+    from quant_engine.features.vwap import daily_vwap
+    t = pd.date_range("2026-06-02 20:00", periods=4, freq="5min", tz="UTC")   # 16:00-16:15 NY = old day
+    t = t.append(pd.date_range("2026-06-02 21:00", periods=3, freq="5min", tz="UTC"))  # 17:00 NY: new day
+    df = pd.DataFrame({"time": t, "open": 10.0, "high": [11, 12, 13, 14, 20, 22, 24], "low": [9, 10, 11, 12, 18, 20, 22],
+                       "close": [10, 11, 12, 13, 19, 21, 23], "tick_volume": [1, 1, 1, 1, 1, 3, 1]})
+    vw, sd = daily_vwap(df, CFG.sessions)
+    assert vw[0] == pytest.approx(10) and vw[3] == pytest.approx(11.5)
+    assert vw[4] == pytest.approx(19) and sd[4] == pytest.approx(0)          # reset at the new day
+    assert vw[5] == pytest.approx((19 + 3 * 21) / 4)
+    vw_cut, _ = daily_vwap(df.iloc[:5], CFG.sessions)
+    assert vw_cut[4] == pytest.approx(vw[4])
+
+
+def test_entries_report_shows_vwap_before_marked_entries(config_dir, tmp_path, monkeypatch, planted):
+    monkeypatch.chdir(tmp_path)
+    store = ParquetStore(tmp_path / "data")
+    for tf in TFS:
+        store.write_bars("XAUUSD", tf, planted[tf])
+    rep = tmp_path / "env"
+    assert cli.run(["--config", str(config_dir), "entries", "--start", "2026-06-01", "--out", str(rep),
+                    "--example", "2026-07-01 13:00,BUY"]) == 0
+    md = (rep / "report.md").read_text()
+    assert "VWAP just before your marked entries" in md and "01 Jul 18:30" in md
+    assert "VWAP filters, any session" in md
+    cand = pd.read_csv(rep / "candidates.csv")
+    assert {"vwap reclaim", "vwap band sweep", "with vwap", "discount"} & set(cand["filter"])
+    assert "vs_vwap_sd" in pd.read_csv(rep / "signals.csv").columns
+    assert len(pd.read_csv(rep / "vwap_buckets.csv")) == 24

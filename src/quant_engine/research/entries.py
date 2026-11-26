@@ -13,6 +13,12 @@
 4. **Target** = ``R`` x risk for each R in ``targets_r``; close after ``horizons`` candles
    if neither is hit (stop checked first on every candle, spread paid).
 
+VWAP (daily, resets 17:00 New York, tick-volume weighted, +-1 standard deviation band) filters
+are tested too: ``vwap band sweep`` (the sweep went beyond the band on the far side: below
+VWAP - 1 sd for buys), ``vwap reclaim`` (the sweep went through VWAP and the signal candle
+closed back on the trade's side of it), ``with vwap`` (signal closes on the trade's side of
+VWAP and VWAP slopes that way over 30 min), ``discount`` (buys below VWAP, sells above).
+
 Filters tested as separate variants: ``any``; ``flush`` (the fall into the low was at least
 ``flush_atr`` ATR over the ``lookback`` candles before it, like a stop run); ``with trend``
 (H4 market type agrees: bullish for buys, bearish for sells). Each variant x session x side
@@ -32,6 +38,7 @@ from ..data.storage import ParquetStore
 from ..features.atr import atr as atr_fn
 from ..features.context import STRUCTURE_TFS
 from ..features.sessions import session_labels
+from ..features.vwap import daily_vwap
 from ..logging_setup import get_logger
 from ..strategy.regime import trend_regime_series
 from ..timeframes import Timeframe
@@ -127,6 +134,21 @@ def run_entries(cfg: AppConfig, store: ParquetStore, dataset: str, point: float,
     n = len(c)
     regime = regime_per_bar(t, h4, trend_regime_series(h4, **regime_kwargs(sc)))
     sess = session_labels(t, sc.sessions)
+    vw, vsd = daily_vwap(m5, sc.sessions)
+    a = atr_fn(m5, 14).to_numpy(dtype="float64")
+    slope = vw - np.concatenate([np.full(6, np.nan), vw[:-6]])          # 30-minute VWAP change
+    side_z = {d: np.where(vsd > 0, d * (c - vw) / np.where(vsd > 0, vsd, 1.0), np.nan) for d in (1, -1)}
+    vfilt = {}
+    for d in (1, -1):
+        k = sig.sweep_idx[d]
+        has = k >= 0
+        kk = np.where(has, k, 0)
+        ext = l[kk] if d == 1 else h[kk]
+        far = vw[kk] - d * vsd[kk]
+        vfilt[d] = {"vwap band sweep": has & ((ext - far) * d < 0) & (vsd[kk] > 0),
+                    "vwap reclaim": has & ((ext - vw[kk]) * d < 0) & ((c - vw) * d > 0),
+                    "with vwap": ((c - vw) * d > 0) & (slope * d > 0),
+                    "discount": (c - vw) * d < 0}
     split = int(n * float(p["discover_frac"]))
     sp_arr = np.full(n, spread)
     thirds = np.linspace(0, split, 4).astype(int)
@@ -138,7 +160,8 @@ def run_entries(cfg: AppConfig, store: ParquetStore, dataset: str, point: float,
                 outcomes[(d, R, hz)] = trade_outcomes(t, o, h, l, c, sp_arr, risk, d, 1.0, float(R), int(hz))
         trend_ok = regime == ("bullish" if d == 1 else "bearish")
         variants = {"any": sig.signal[d], "flush": sig.signal[d] & sig.flush[d],
-                    "with trend": sig.signal[d] & trend_ok}
+                    "with trend": sig.signal[d] & trend_ok,
+                    **{k: sig.signal[d] & v for k, v in vfilt[d].items()}}
         for vname, vmask in variants.items():
             for s in ("any", "asia", "london_kz", "newyork_kz", "london_close"):
                 m = vmask if s == "any" else vmask & (sess == s)
@@ -170,6 +193,7 @@ def run_entries(cfg: AppConfig, store: ParquetStore, dataset: str, point: float,
                                             np.where(cand["val_avg_r"] > 0, "held up (not proven)", "failed")))
         cand = cand.sort_values("t", ascending=False).reset_index(drop=True)
     cand.to_csv(out / "candidates.csv", index=False)
+    vf_rows = cand[cand["filter"].isin(["any", *vfilt[1].keys()]) & (cand["session"] == "any")] if len(cand) else cand
 
     # every signal with its 3R / 3 h result, for inspection
     sig_rows = []
@@ -180,6 +204,8 @@ def run_entries(cfg: AppConfig, store: ParquetStore, dataset: str, point: float,
                              "entry_approx": round(c[j] + (spread if d == 1 else 0), 2),
                              "stop": round(sig.stop[d][j], 2), "risk_usd": round(sig.risk[d][j], 2),
                              "flush": bool(sig.flush[d][j]), "regime": regime[j], "session": sess[j],
+                             "vwap": round(float(vw[j]), 2), "vs_vwap_sd": round(float(side_z[d][j]), 2),
+                             **{k.replace(" ", "_"): bool(v[j]) for k, v in vfilt[d].items()},
                              f"r_at_{max(p['targets_r']):g}R": None if np.isnan(r3[j]) else round(float(r3[j]), 2)})
     sigs = pd.DataFrame(sig_rows).sort_values("signal_close_utc") if sig_rows else pd.DataFrame()
     sigs.to_csv(out / "signals.csv", index=False)
@@ -199,6 +225,45 @@ def run_entries(cfg: AppConfig, store: ParquetStore, dataset: str, point: float,
                         "result_3R": "" if not len(near) else near.iloc[0, -1]})
     exdf = pd.DataFrame(ex_rows)
 
+    # VWAP just before each marked entry (the last candle closed at the marked time)
+    closes = t + Timeframe.M5.delta
+    vw_rows = []
+    for when, side in examples or []:
+        w = pd.Timestamp(when, tz="UTC")
+        j = int(closes.searchsorted(w, side="right")) - 1
+        if j < 6:
+            continue
+        lo6, hi6 = l[j - 5:j + 1].min(), h[j - 5:j + 1].max()
+        ext = lo6 if side == 1 else hi6
+        vw_rows.append({"your entry (IST)": f"{w.tz_convert('Asia/Kolkata'):%d %b %H:%M}",
+                        "side": "BUY" if side == 1 else "SELL", "price": round(c[j], 2), "vwap": round(vw[j], 2),
+                        "price - vwap ($)": round(c[j] - vw[j], 2),
+                        "in ATR": round((c[j] - vw[j]) / a[j], 2) if a[j] > 0 else np.nan,
+                        "in band sd": round((c[j] - vw[j]) / vsd[j], 2) if vsd[j] > 0 else np.nan,
+                        "vwap 30-min slope ($)": round(slope[j], 2),
+                        "30-min low/high vs vwap (sd)": round((ext - vw[j]) / vsd[j], 2) if vsd[j] > 0 else np.nan,
+                        "touched far band": bool((ext - (vw[j] - side * vsd[j])) * side < 0)})
+    vwdf = pd.DataFrame(vw_rows)
+
+    # every signal (3R / 3 h): result by where the signal closed versus VWAP, on the trade's side
+    buckets = [-np.inf, -2, -1, 0, 1, 2, np.inf]
+    labels = ["2+ sd wrong side", "1-2 sd wrong side", "0-1 sd wrong side", "0-1 sd right side",
+              "1-2 sd right side", "2+ sd right side"]
+    brows = []
+    for d in (1, -1):
+        r3, ex3 = outcomes[(d, max(p["targets_r"]), max(p["horizons"]))]
+        idx = np.nonzero(sig.signal[d])[0]
+        idx = idx[ex3[idx] >= 0]
+        z = pd.cut(side_z[d][idx], buckets, labels=labels)
+        for part, sel in (("older", idx < split), ("unseen", idx >= split)):
+            for lab in labels:
+                rr = r3[idx[sel & (z == lab)]]
+                brows.append({"side": "BUY" if d == 1 else "SELL", "data": part, "signal vs vwap": lab,
+                              "signals": len(rr), "win_rate_pct": round(100 * float((rr > 0).mean()), 1) if len(rr) else np.nan,
+                              "avg_r": round(float(rr.mean()), 3) if len(rr) else np.nan})
+    bdf = pd.DataFrame(brows)
+    bdf.to_csv(out / "vwap_buckets.csv", index=False)
+
     allrow = cand[(cand["filter"] == "any") & (cand["session"] == "any")] if len(cand) else cand
     cols = ["side", "filter", "session", "target_r", "minutes", "trades", "win_rate_pct", "breakeven_win_pct",
             "avg_r", "total_r", "p", "val_trades", "val_win_rate_pct", "val_avg_r", "verdict"]
@@ -214,9 +279,18 @@ def run_entries(cfg: AppConfig, store: ParquetStore, dataset: str, point: float,
           f"- **signals found**: {int(sig.signal[1].sum()):,} buys, {int(sig.signal[-1].sum()):,} sells\n",
           "## Does the rule catch your trades?\n",
           _table(exdf, list(exdf.columns)) if len(exdf) else "_no examples given_\n",
+          "\n## VWAP just before your marked entries\n",
+          "Daily VWAP (resets 17:00 New York = 03:30 IST), tick-volume weighted. 'sd' = the VWAP band width "
+          "(1 standard deviation). Wrong side = below VWAP for a buy.\n",
+          _table(vwdf, list(vwdf.columns)) if len(vwdf) else "_none_\n",
+          f"\n## Every signal by distance from VWAP ({max(p['targets_r']):g}R target, "
+          f"{max(p['horizons']) * 5} min limit; overlapping signals included)\n",
+          _table(bdf, list(bdf.columns)),
           "\n## The plain rule, every signal, any session (older data, then unseen data)\n",
           "breakeven_win_pct = win rate needed to break even at that target (before spread). R = multiples of the risk.\n",
           _table(allrow, cols),
+          "\n## VWAP filters, any session\n",
+          _table(vf_rows, cols),
           f"\n## Best versions on the older data ({len(cand)} tested)\n",
           _table(cand.head(15), cols),
           f"\n## Passed the strict filter: {len(surv)}\n",
