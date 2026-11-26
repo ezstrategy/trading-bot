@@ -623,3 +623,16 @@ def test_london_high_win_grid_cli(config_dir, tmp_path, monkeypatch, planted):
     assert "Versions winning 50%+" in md and "high-win" in md and "TP1: half closed at" in md
     v = pd.read_csv(rep / "versions.csv")
     assert len(v) == 793                          # tp1 must be below the target; + the published rules
+
+
+def test_london_other_instrument_uses_its_own_spread(config_dir, tmp_path, monkeypatch, planted):
+    monkeypatch.chdir(tmp_path)
+    store = ParquetStore(tmp_path / "data")
+    for tf in TFS:
+        store.write_bars("EURUSD", tf, planted[tf])
+    rep = tmp_path / "eu"
+    assert cli.run(["--config", str(config_dir), "--instrument", "eurusd", "london", "--start", "2026-01-01",
+                    "--min-trades", "20", "--out", str(rep)]) == 0
+    md = (rep / "report.md").read_text()
+    assert "London breakout on EURUSD" in md and "(30 points of 1e-05)" in md
+    assert cli.run(["--config", str(config_dir), "--instrument", "NOPE", "london", "--out", str(rep)]) == 2

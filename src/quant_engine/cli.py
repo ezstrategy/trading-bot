@@ -53,9 +53,14 @@ def _range(args: argparse.Namespace, default_days: int) -> tuple[pd.Timestamp, p
     return start, end
 
 
+# GUESS: usual 5-digit broker tick sizes; pass --point if your broker differs.
+POINTS = {"XAUUSD": 0.01, "XAGUSD": 0.001, "EURUSD": 0.00001, "GBPUSD": 0.00001, "USDJPY": 0.001}
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="quant_engine", description="XAUUSD Quant Engine (signals only)")
     p.add_argument("--config", help="config folder (default ./config)")
+    p.add_argument("--instrument", help="research another symbol (XAGUSD, EURUSD, GBPUSD, USDJPY); default from engine.yaml")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("check", help="connect, resolve symbol and show server time offset")
     s = sub.add_parser("symbols", help="list broker symbols")
@@ -130,8 +135,10 @@ def build_parser() -> argparse.ArgumentParser:
     lo.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
     lo.add_argument("--start", default="2020-01-01")
     lo.add_argument("--end")
-    lo.add_argument("--point", type=float, default=0.01)
-    lo.add_argument("--spread-points", type=float, default=8.0, help="spread per trade in points (8 = $0.08)")
+    lo.add_argument("--point", type=float, help="tick size (default per instrument: XAUUSD 0.01, XAGUSD 0.001, "
+                                                "EURUSD/GBPUSD 0.00001, USDJPY 0.001)")
+    lo.add_argument("--spread-points", type=float,
+                    help="spread per trade in points (default: 8 for XAUUSD, else the median bar spread of the last year)")
     lo.add_argument("--min-trades", type=int, default=300, help="fewest older-data trades for the chosen version")
     lo.add_argument("--grid", choices=["standard", "high-win"], default="standard",
                     help="high-win = small targets, TP1 half close + runner, early break-even")
@@ -304,6 +311,13 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
     lc = cfg.engine.logging
     setup_logging(lc.level, lc.json_format, lc.file)
     store = ParquetStore(cfg.data.storage.root)
+    if args.instrument:
+        cfg = cfg.model_copy(update={"engine": cfg.engine.model_copy(update={"instrument": args.instrument.upper()})})
+        try:
+            cfg.mapping()                           # fails early if symbols.yaml has no entry
+        except ConfigError as exc:
+            print(f"Config error: {exc}", file=sys.stderr)
+            return 2
     canonical = cfg.engine.instrument
 
     if args.cmd == "validate":
@@ -344,11 +358,12 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
         ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
         out = args.out or f"reports/london_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
         try:
-            summary = run_london(cfg, store, ds, args.point, out,
+            summary = run_london(cfg, store, ds, args.point or POINTS.get(canonical, 0.01), out,
                                  pd.Timestamp(args.start, tz="UTC") if args.start else None,
                                  pd.Timestamp(args.end, tz="UTC") if args.end else None,
                                  f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)",
-                                 spread_points=args.spread_points, min_trades=args.min_trades,
+                                 spread_points=args.spread_points if args.spread_points is not None
+                                 else (8.0 if canonical == "XAUUSD" else None), min_trades=args.min_trades,
                                  grid=args.grid, min_win=args.min_win)
         except ValueError as exc:
             print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)

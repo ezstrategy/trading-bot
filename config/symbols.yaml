@@ -7,3 +7,21 @@ XAUUSD:
   candidates: [XAUUSD, XAUUSDm, XAUUSD.r, XAUUSD.a, XAUUSD+, XAUUSD.i, GOLD, GOLD.i, GOLDm]
   # Fallback: regex over all broker symbols (must match exactly one)
   pattern: '^(XAUUSD|GOLD)([._+\-]?[A-Za-z0-9]{0,4})?$'
+
+# Other instruments, only for research (the owner asked on 2026-11-26 to compare win rates).
+XAGUSD:
+  broker_symbol: ""
+  candidates: [XAGUSD, XAGUSDm, XAGUSD.r, XAGUSD.a, XAGUSD+, XAGUSD.i, SILVER, SILVER.i, SILVERm]
+  pattern: '^(XAGUSD|SILVER)([._+\-]?[A-Za-z0-9]{0,4})?$'
+EURUSD:
+  broker_symbol: ""
+  candidates: [EURUSD, EURUSDm, EURUSD.r, EURUSD.a, EURUSD+, EURUSD.i]
+  pattern: '^EURUSD([._+\-]?[A-Za-z0-9]{0,4})?$'
+GBPUSD:
+  broker_symbol: ""
+  candidates: [GBPUSD, GBPUSDm, GBPUSD.r, GBPUSD.a, GBPUSD+, GBPUSD.i]
+  pattern: '^GBPUSD([._+\-]?[A-Za-z0-9]{0,4})?$'
+USDJPY:
+  broker_symbol: ""
+  candidates: [USDJPY, USDJPYm, USDJPY.r, USDJPY.a, USDJPY+, USDJPY.i]
+  pattern: '^USDJPY([._+\-]?[A-Za-z0-9]{0,4})?$'

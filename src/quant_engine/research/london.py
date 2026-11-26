@@ -63,7 +63,7 @@ def r_stats(r: np.ndarray, risk_pct: float) -> dict:
 
 def run_london(cfg: AppConfig, store: ParquetStore, dataset: str, point: float, out_dir: str | Path,
                start: pd.Timestamp | None = None, end: pd.Timestamp | None = None, source_note: str = "",
-               spread_points: float = 8.0, discover_frac: float = 0.6, min_trades: int = 300,
+               spread_points: float | None = 8.0, discover_frac: float = 0.6, min_trades: int = 300,
                grid: str = "standard", min_win: float = 0.0) -> dict:
     """Backtest every version in ``GRIDS[grid]`` and write ``report.md``, ``versions.csv`` and trade files.
     The chosen version is the best average R on the older data among versions with at least
@@ -75,6 +75,9 @@ def run_london(cfg: AppConfig, store: ParquetStore, dataset: str, point: float, 
     h4 = store.read_bars(dataset, Timeframe.H4, start, end)
     if m5.empty or h4.empty:
         raise ValueError(f"No stored {dataset} M5/H4 data")
+    if spread_points is None:      # the broker's own spread: median bar spread over the last year
+        recent = m5[m5["time"] >= m5["time"].iat[-1] - pd.Timedelta(days=365)]
+        spread_points = float(recent["spread"].median()) if "spread" in recent and recent["spread"].notna().any() else 0.0
     sp = spread_points * point
     t = pd.DatetimeIndex(m5["time"])
     split = t[int(len(t) * discover_frac)]
@@ -154,12 +157,12 @@ def run_london(cfg: AppConfig, store: ParquetStore, dataset: str, point: float, 
                          for d in ("older", "unseen")] +
                         [{"version": "best on older data", "data": d, **{c: best[f"{d}_{c}"] for c in scols}}
                          for d in ("older", "unseen")])
-    md = ["# London breakout: what makes it better?\n",
+    md = [f"# London breakout on {dataset}: what makes it better?\n",
           f"- **versions searched**: {grid}" + (f"; chosen among versions winning at least {min_win:g}% on the older data"
                                                if min_win else ""),
           f"- **data**: {source_note or dataset}",
           f"- **period (UTC)**: {t[0]:%Y-%m-%d} to {t[-1]:%Y-%m-%d}; unseen data from {split:%Y-%m-%d}",
-          f"- **spread**: ${sp:.2f} on every trade; returns at {risk_pct:g}% risk per trade (simple sum)",
+          f"- **spread**: {sp:.5g} in price ({spread_points:g} points of {point:g}) on every trade; returns at {risk_pct:g}% risk per trade (simple sum)",
           f"- **versions tested**: {len(res)} (every combination of the changes below)",
           f"- **trades held past the 17:00 New York rollover (swap)**: {crossed}\n",
           "## Published rules vs the best version chosen on the older data\n",
@@ -181,7 +184,7 @@ def run_london(cfg: AppConfig, store: ParquetStore, dataset: str, point: float, 
           "\n## Year by year: best version\n", _table(yearly(btr), ["year", *scols]),
           "\n_Research on past data, not a promise of future profit. Signals only._\n"]
     (out / "report.md").write_text("\n".join(md), encoding="utf-8")
-    summary = {"versions": len(res), "best": {k: best[k] for k in pcols}, "verdict": verdict,
+    summary = {"instrument": dataset, "spread_points": spread_points, "point": point, "versions": len(res), "best": {k: best[k] for k in pcols}, "verdict": verdict,
                "best_unseen_avg_r": best["unseen_avg_r"], "published_unseen_avg_r": base["unseen_avg_r"],
                "best_unseen_win_pct": best["unseen_win_pct"], "high_win_versions_ok_unseen": int(len(hw_ok)),
                "top20_carried": carried, "corr": round(corr, 2), "report": str(out / "report.md")}
