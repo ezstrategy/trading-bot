@@ -41,3 +41,10 @@ Holding gold over the same parts: +32.7% older, +77.0% unseen.
 | 50/200-day MA cross | 11 tr | 1 tr | REJECTED: no sample |
 | ICT Silver Bullet (10-11 NY) | -0.094R | -0.065R | REJECTED |
 | Gold US day session (09:30-16:00 NY) | -24.7% | +19.9% | REJECTED |
+
+## GTC-SBR (owner's spec, 2026-11-26)
+
+`research/gtc_sbr.py` codes the owner's GTC-SBR rules (experiments A-F, 60/20/20 split). It has
+**not** been run on real data. GTC-SBR v1.0.0 is tested in the Quant Lab (PR #9, programme
+`gtc_sbr_2020`), which locks the last 20% of 2020+ as its test period. To keep that period
+untouched, `python -m quant_engine gtc` must not be run on real data before the Quant Lab's test.
