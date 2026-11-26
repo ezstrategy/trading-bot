@@ -173,7 +173,9 @@ The owner's Quant Lab specification is being built in phases on top of this engi
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the plan and [docs/DATA_MANAGEMENT.md](docs/DATA_MANAGEMENT.md)
 for Phase 2: versioned, never-modified research datasets (`data-import`, `data-snapshot`,
 `data-list`, `data-show`, `data-verify`, `import_csv.bat`, `snapshot_data.bat`) and broker
-instrument profiles (`config/instruments.yaml`, `instrument`).
+instrument profiles (`config/instruments.yaml`, `instrument`). Phases 3-9 (event-driven engine,
+strategy plug-ins, analytics, experiment registry, validation, dashboard tab, MT5 import, audit):
+[docs/QUANT_LAB.md](docs/QUANT_LAB.md) and [docs/PHASES_3_9_REPORT.md](docs/PHASES_3_9_REPORT.md).
 
 ## Requirements
 

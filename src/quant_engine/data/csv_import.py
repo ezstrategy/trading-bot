@@ -221,7 +221,7 @@ def parse_csv(path: str | Path | None = None, *, text: str | None = None, source
     for k in BAR_COLUMNS[1:]:
         bars[k] = bars[k].astype("float64")
     t = pd.DatetimeIndex(bars["time"]).sort_values().unique()
-    inferred = float(pd.Series(np.diff(t.asi8) / 60e9).median()) if len(t) > 2 else None
+    inferred = float(pd.Series(np.diff(t.as_unit("ns").asi8) / 60e9).median()) if len(t) > 2 else None
     return ParseResult(bars=bars, layout=layout_name, columns={k: str(v) for k, v in cmap.items()},
                        source_tz=source_tz, rows_in_file=len(df), unparseable=bad,
                        spread_in_file="spread" in cmap, inferred_minutes=inferred)

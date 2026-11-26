@@ -28,6 +28,14 @@
     python -m quant_engine data-show VERSION_ID [--issues 50]
     python -m quant_engine data-verify VERSION_ID
     python -m quant_engine instrument [--profile NAME]              (broker spec from instruments.yaml)
+    python -m quant_engine mt5-instrument --profile NAME            (broker spec read from MT5, new profile file)
+    python -m quant_engine mt5-import [--timeframes M1,M5,M15] [--start 2020-01-01]   (MT5 history -> dataset versions)
+
+  Quant Lab research (see docs/QUANT_LAB.md):
+    python -m quant_engine lab-strategies | lab-list | lab-show ID | lab-compare ID ID | lab-note ID "text" [--status S]
+    python -m quant_engine lab-run --programme NAME [--strategies a,b] [--part development|validation|test] [--final-test]
+    python -m quant_engine lab-validate --programme NAME [--grid JSON] [--neighbours JSON]
+    python -m quant_engine lab-audit ID
 """
 from __future__ import annotations
 
@@ -193,6 +201,16 @@ def build_parser() -> argparse.ArgumentParser:
     dv.add_argument("version_id")
     ins = sub.add_parser("instrument", help="show a broker instrument profile from instruments.yaml")
     ins.add_argument("--profile")
+    mi = sub.add_parser("mt5-instrument", help="read the broker's XAUUSD specification from MT5 into a new profile")
+    mi.add_argument("--profile", required=True, help="name of the new profile, e.g. icmarkets_raw")
+    mi.add_argument("--broker", default="")
+    mm = sub.add_parser("mt5-import", help="download MT5 history and freeze it as dataset versions")
+    mm.add_argument("--timeframes", help="default M1,M5,M15")
+    mm.add_argument("--start", default="2020-01-01")
+    mm.add_argument("--end")
+    mm.add_argument("--days", type=int)
+    mm.add_argument("--note", default="")
+    _lab_parsers(sub)
     db = sub.add_parser("dashboard", help="open the local web dashboard")
     db.add_argument("--port", type=int, default=8501)
     return p
@@ -292,6 +310,119 @@ def _data_cmd(cfg, store: ParquetStore, canonical: str, args: argparse.Namespace
         print(f"Import failed: {exc}", file=sys.stderr)
         return 1
     return 2
+
+
+def _lab_parsers(sub) -> None:
+    """Quant Lab research commands."""
+    sub.add_parser("lab-strategies", help="list strategy plug-ins with their rules and parameters")
+    common = []
+    for name, hlp in (("lab-run", "backtest strategies on one part of a programme and register the experiment"),
+                      ("lab-validate", "walk-forward, sensitivity and cost stress on development + validation data")):
+        x = sub.add_parser(name, help=hlp)
+        x.add_argument("--strategies", default="gtc_sbr_bull,gtc_sbr_bear")
+        x.add_argument("--params", default="{}", help='JSON, applied to every strategy, e.g. {"target_r": 2}')
+        x.add_argument("--programme", required=True, help="research programme name (its split is fixed at first use)")
+        x.add_argument("--m5", default="latest")
+        x.add_argument("--m1", default="auto", help="version id, auto (latest if any) or none")
+        x.add_argument("--m15", default="auto")
+        x.add_argument("--allow-issues", action="store_true", help="use dataset versions with blocking quality issues")
+        x.add_argument("--profile", default="", help="instrument profile (instruments.yaml)")
+        x.add_argument("--title", default="")
+        x.add_argument("--hypothesis", default="")
+        common.append(x)
+    r = common[0]
+    r.add_argument("--part", default="development", choices=["development", "validation", "test", "dev+val", "all"])
+    r.add_argument("--final-test", action="store_true", help="allow the untouched test period (final check only)")
+    r.add_argument("--spread-mult", type=float)
+    r.add_argument("--slippage", type=float, help="points per fill")
+    r.add_argument("--commission", type=float, help="per lot, round turn")
+    r.add_argument("--no-m1", action="store_true", help="ignore M1 data (stop-first on every M5 candle)")
+    r.add_argument("--note", default="")
+    v = common[1]
+    v.add_argument("--grid", help='JSON list of at most max_grid parameter sets for walk-forward re-selection')
+    v.add_argument("--neighbours", help='JSON {"param": [values]} for the sensitivity table')
+    sub.add_parser("lab-list", help="list registered experiments")
+    sh = sub.add_parser("lab-show", help="show one experiment (status, notes, report)")
+    sh.add_argument("id")
+    cp = sub.add_parser("lab-compare", help="compare experiments side by side")
+    cp.add_argument("ids", nargs="+")
+    nt = sub.add_parser("lab-note", help="add a research note and/or status to an experiment (never overwrites)")
+    nt.add_argument("id")
+    nt.add_argument("text", nargs="?", default="")
+    nt.add_argument("--status")
+    au = sub.add_parser("lab-audit", help="independent audit of an experiment (re-run, look-ahead, costs, rule 14)")
+    au.add_argument("id")
+    au.add_argument("--cuts", type=int, default=8, help="look-ahead cut points per strategy")
+
+
+def _lab_cmd(cfg, args: argparse.Namespace) -> int:
+    """Quant Lab research commands (no MT5 needed)."""
+    from pathlib import Path
+
+    from .data.catalog import DatasetCatalog, DataQualityError
+    from .experiments.lab import load_lab_settings, load_market, run_experiment, run_validation
+    from .experiments.registry import ExperimentRegistry, RegistryError
+    from .instruments import load_instruments
+    from .strategies import available, create
+    from .validation import TestSetLocked
+    settings = load_lab_settings(args.config)
+    reg = ExperimentRegistry(Path(cfg.data.storage.root) / "experiments")
+    try:
+        if args.cmd == "lab-strategies":
+            print(json.dumps([create(s).describe() for s in available()], indent=2))
+            return 0
+        if args.cmd == "lab-list":
+            df = reg.list()
+            print(df.to_string(index=False) if len(df) else "No experiments yet.")
+            return 0
+        if args.cmd == "lab-show":
+            e = reg.get(args.id)
+            print(json.dumps({k: e[k] for k in ("id", "kind", "title", "status", "programme", "data_part", "date_from",
+                                                "date_to", "test_set_used", "strategies", "dataset_ids", "git_commit",
+                                                "notes")}, indent=2, default=str))
+            rp = Path(e["folder"]) / "report.md"
+            if rp.exists():
+                print(rp.read_text(encoding="utf-8"))
+            return 0
+        if args.cmd == "lab-compare":
+            print(reg.compare(args.ids).to_string())
+            return 0
+        if args.cmd == "lab-note":
+            if args.text:
+                reg.add_note(args.id, args.text)
+            if args.status:
+                reg.set_status(args.id, args.status)
+            print(json.dumps({"id": args.id, "status": reg.get(args.id)["status"]}))
+            return 0
+        spec = load_instruments(args.config).get(getattr(args, "profile", "") or settings.instrument_profile or None)
+        cat = DatasetCatalog(cfg.data.catalog_root(), cfg.data.quality)
+        if args.cmd == "lab-audit":
+            from .audit import audit_experiment
+            out = audit_experiment(reg, cat, spec, settings, args.id, cuts=args.cuts)
+            print(json.dumps({k: out[k] for k in ("id", "audited", "passed", "failed", "classification")}, indent=2))
+            print(f"Report: {out['folder']}/report.md")
+            return 0 if not out["failed"] else 1
+        data = load_market(cat, settings.symbol, {"M5": args.m5, "M1": args.m1, "M15": args.m15},
+                           allow_issues=args.allow_issues, point=spec.point)
+        params = json.loads(args.params or "{}")
+        strategies = [(s.strip(), params) for s in args.strategies.split(",") if s.strip()]
+        if args.cmd == "lab-run":
+            over = {k: v for k, v in (("spread_multiplier", args.spread_mult), ("slippage_points", args.slippage),
+                                      ("commission_per_lot", args.commission)) if v is not None}
+            if args.no_m1:
+                over["use_m1"] = False
+            out = run_experiment(reg, data, spec, settings, strategies, args.programme, args.part, args.final_test,
+                                 over, args.title, args.hypothesis, args.note)
+        else:
+            out = run_validation(reg, data, spec, settings, strategies, args.programme,
+                                 json.loads(args.grid) if args.grid else None,
+                                 json.loads(args.neighbours) if args.neighbours else None, args.title, args.hypothesis)
+        print(json.dumps(out, indent=2, default=str))
+        print(f"Report: {out['folder']}/report.md")
+        return 0
+    except (TestSetLocked, RegistryError, DataQualityError, ValueError, KeyError, ConfigError) as exc:
+        print(f"Refused: {exc}", file=sys.stderr)
+        return 1
 
 
 def _print_import(res) -> None:
@@ -439,6 +570,8 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
             return 2
     canonical = cfg.engine.instrument
 
+    if args.cmd.startswith("lab-"):
+        return _lab_cmd(cfg, args)
     if args.cmd.startswith("data-") or args.cmd == "instrument":
         return _data_cmd(cfg, store, canonical, args)
     if args.cmd == "validate":
@@ -604,6 +737,45 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
                 print(f"{r.dataset}: {r.rows_stored} ticks, quality={'OK' if r.quality.ok else 'ISSUES'} {r.quality.counts()}")
             elif args.cmd == "run":
                 return _run_engine(cfg, s, args, now, fetch_text)
+            elif args.cmd == "mt5-instrument":
+                from .instruments import InstrumentSpec, load_instruments, write_profile
+                book = load_instruments(args.config)
+                info = s.client.call("symbol_info", s.symbol.name)
+                acct = s.client.call("account_info", allow_none=True)
+                spec = InstrumentSpec.from_symbol_info(info, getattr(acct, "currency", "") or "", name=args.profile,
+                                                       broker=args.broker or getattr(acct, "server", "") or "",
+                                                       base=book.get())
+                try:
+                    path = write_profile(spec, args.config or "config",
+                                         note=f"on {pd.Timestamp.now(tz='UTC'):%Y-%m-%d %H:%M} UTC")
+                except FileExistsError as exc:
+                    print(f"Refused: {exc}", file=sys.stderr)
+                    return 1
+                print(json.dumps({"profile": spec.name, "file": str(path), "warnings": spec.consistency_warnings(),
+                                  "still_guessed": spec.guesses()}, indent=2))
+            elif args.cmd == "mt5-import":
+                from .data.catalog import DatasetCatalog
+                start, end = _range(args, cfg.data.download.default_days)
+                dl = HistoricalDownloader(s.collector, store, canonical, cfg.data)
+                cat = DatasetCatalog(cfg.data.catalog_root(), cfg.data.quality)
+                st = cfg.mt5.server_time
+                rc = 0
+                for tf in _tfs(args.timeframes, [Timeframe.M1, Timeframe.M5, Timeframe.M15]):
+                    r = dl.download_bars(tf, start, end, resume=True)
+                    bars = store.read_bars(canonical, tf, start, end)
+                    if bars.empty:
+                        print(f"{tf.value}: MT5 returned no candles")
+                        continue
+                    res = cat.import_frame(bars, canonical, tf, source_kind="mt5",
+                                           source_name=f"MT5 {s.symbol.name} ({getattr(s.client.call('account_info', allow_none=True), 'server', '')})",
+                                           settings={"server_clock_mode": s.clock.mode,
+                                                     "server_offset_hours_now": s.clock.offset_at(s.collector.now()).total_seconds() / 3600,
+                                                     "server_time_config": st.model_dump(), "broker_symbol": s.symbol.name,
+                                                     "requested": [str(start), str(end)], "download_quality": r.quality.counts()},
+                                           note=args.note)
+                    _print_import(res)
+                    rc = rc or (0 if res.quality_ok else 1)
+                return rc
             elif args.cmd == "latest":
                 tf = Timeframe.parse(args.timeframe)
                 print(s.collector.latest_bars(tf, args.count).to_string(index=False))

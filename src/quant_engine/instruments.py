@@ -116,20 +116,24 @@ class InstrumentSpec(BaseModel):
                          base: "InstrumentSpec | None" = None) -> "InstrumentSpec":
         """Build a spec from an MT5 ``symbol_info`` record (read-only data; nothing is traded).
 
-        Fields MT5 does not report (commission, execution assumptions) are copied from ``base``.
+        Fields MT5 does not report (commission, execution assumptions), or that this record lacks,
+        are copied from ``base`` and stay unconfirmed.
         """
-        g = lambda k, d=None: getattr(info, k, d)  # noqa: E731
         b = base.model_dump() if base else {}
-        return cls(**{**b, "name": name or b.get("name", ""), "broker": broker or b.get("broker", "unknown"),
-                      "symbol": b.get("symbol", g("name")), "broker_symbol": g("name"),
-                      "contract_size": float(g("trade_contract_size")), "min_lot": float(g("volume_min")),
-                      "max_lot": float(g("volume_max")), "lot_step": float(g("volume_step")),
-                      "tick_size": float(g("trade_tick_size")), "tick_value": float(g("trade_tick_value")),
-                      "digits": int(g("digits")), "profit_currency": g("currency_profit", "USD"),
-                      "account_currency": account_currency,
-                      "confirmed": sorted(set(b.get("confirmed", [])) | {
-                          "contract_size", "min_lot", "max_lot", "lot_step", "tick_size", "tick_value",
-                          "digits", "account_currency", "profit_currency"})})
+        mt5_fields = {"contract_size": "trade_contract_size", "min_lot": "volume_min", "max_lot": "volume_max",
+                      "lot_step": "volume_step", "tick_size": "trade_tick_size", "tick_value": "trade_tick_value",
+                      "digits": "digits", "profit_currency": "currency_profit"}
+        got = {}
+        for ours, theirs in mt5_fields.items():
+            v = getattr(info, theirs, None)
+            if v is not None and v != "":
+                got[ours] = v if ours == "profit_currency" else (int(v) if ours == "digits" else float(v))
+        if account_currency:
+            got["account_currency"] = account_currency
+        confirmed = sorted(set(b.get("confirmed", [])) | set(got))
+        return cls(**{**b, **got, "name": name or b.get("name", ""), "broker": broker or b.get("broker", "unknown"),
+                      "symbol": b.get("symbol", getattr(info, "name", "")),
+                      "broker_symbol": getattr(info, "name", b.get("broker_symbol", "")), "confirmed": confirmed})
 
 
 class InstrumentBook(BaseModel):
@@ -154,12 +158,33 @@ class InstrumentBook(BaseModel):
 
 
 def load_instruments(config_dir: str | Path | None = None) -> InstrumentBook:
-    """Read and validate ``instruments.yaml``."""
+    """Read and validate ``instruments.yaml`` plus any ``instruments.<name>.yaml`` files (profiles
+    written by ``mt5-instrument``); a later file cannot redefine an existing profile name."""
     import os
-    p = Path(config_dir or os.getenv("QE_CONFIG_DIR", "config")) / "instruments.yaml"
+    root = Path(config_dir or os.getenv("QE_CONFIG_DIR", "config"))
+    p = root / "instruments.yaml"
     if not p.exists():
         raise ConfigError(f"Missing config file: {p}")
     try:
-        return InstrumentBook(**(yaml.safe_load(p.read_text(encoding="utf-8")) or {}))
+        book = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        for extra in sorted(root.glob("instruments.*.yaml")):
+            more = (yaml.safe_load(extra.read_text(encoding="utf-8")) or {}).get("profiles", {})
+            clash = set(more) & set(book.get("profiles", {}))
+            if clash:
+                raise ValueError(f"{extra.name} redefines profile(s) {sorted(clash)}")
+            book.setdefault("profiles", {}).update(more)
+        return InstrumentBook(**book)
     except Exception as exc:
-        raise ConfigError(f"Invalid instruments.yaml: {exc}") from exc
+        raise ConfigError(f"Invalid instrument profiles: {exc}") from exc
+
+
+def write_profile(spec: InstrumentSpec, config_dir: str | Path, note: str = "") -> Path:
+    """Save one profile as ``config/instruments.<name>.yaml`` (refuses to overwrite)."""
+    root = Path(config_dir)
+    p = root / f"instruments.{spec.name}.yaml"
+    if p.exists():
+        raise FileExistsError(f"{p} exists; choose another --profile name (profiles are not overwritten)")
+    body = {"profiles": {spec.name: spec.model_dump(exclude={"name"})}}
+    head = f"# Written by `quant_engine mt5-instrument` {note}\n# Fields in `confirmed` came from MT5; the rest are copied guesses.\n"
+    p.write_text(head + yaml.safe_dump(body, sort_keys=False), encoding="utf-8")
+    return p

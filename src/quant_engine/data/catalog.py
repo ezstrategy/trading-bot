@@ -67,7 +67,7 @@ def sha256_file(path: str | Path) -> str:
 def bars_fingerprint(bars: pd.DataFrame) -> str:
     """Content hash of a bar frame that does not depend on the Parquet writer version."""
     h = hashlib.sha256()
-    h.update(np.asarray(pd.DatetimeIndex(bars["time"]).asi8, dtype="int64").tobytes())
+    h.update(np.asarray(pd.DatetimeIndex(bars["time"]).as_unit("ns").asi8, dtype="int64").tobytes())
     for k in BAR_COLUMNS[1:]:
         h.update(np.ascontiguousarray(bars[k].to_numpy(dtype="float64")).tobytes())
     return h.hexdigest()
