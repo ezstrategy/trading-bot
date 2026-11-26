@@ -21,3 +21,12 @@ quality:
   daily_break_utc: [20, 23]              # [start_hour, end_hour) window where a break is expected
   max_spike_atr: 15.0                    # bar range larger than this x median range is flagged
   max_tick_spread: 5.0                   # ask - bid above this (USD) is flagged
+  max_gap_atr: 20.0                      # open this far from the previous close (x median range) -> warning
+  price_bounds: [100, 20000]             # GUESS: any XAUUSD price outside this is a data error
+  # Issue kinds that block a dataset version from research until you decide (see docs/DATA_MANAGEMENT.md).
+  # Missing candles, spikes and gaps are reported but do not block.
+  blocking_issues: [not_utc, unsorted, duplicate, misaligned, nan, non_positive, invalid_ohlc, out_of_bounds, unparseable_row]
+
+catalog:
+  # Versioned, never-modified research datasets (Quant Lab, Phase 2). Inside storage.root.
+  folder: catalog

@@ -20,6 +20,14 @@
     python -m quant_engine run [--dry-run] [--once]      (live signals to Telegram; never trades)
     python -m quant_engine news                           (refresh the economic calendar, show blocks)
     python -m quant_engine telegram-test                  (send a test message)
+
+  Quant Lab data management (versioned research datasets, never modified):
+    python -m quant_engine data-import FILE --timeframe M5 [--tz UTC|mt5_server|+02:00|Europe/London] [--source-name ...]
+    python -m quant_engine data-snapshot [--timeframes M1,M5,M15]   (freeze the MT5 bars already downloaded)
+    python -m quant_engine data-list [--timeframe M5]
+    python -m quant_engine data-show VERSION_ID [--issues 50]
+    python -m quant_engine data-verify VERSION_ID
+    python -m quant_engine instrument [--profile NAME]              (broker spec from instruments.yaml)
 """
 from __future__ import annotations
 
@@ -163,6 +171,28 @@ def build_parser() -> argparse.ArgumentParser:
     rn.add_argument("--once", action="store_true", help="run one cycle and exit")
     sub.add_parser("news", help="refresh the economic calendar and list upcoming blocks")
     sub.add_parser("telegram-test", help="send a test message to the Telegram chat in .env")
+    di = sub.add_parser("data-import", help="import a CSV of historical candles as a new dataset version")
+    di.add_argument("file")
+    di.add_argument("--timeframe", required=True, help="M1, M5, M15 (H1/H4 also accepted)")
+    di.add_argument("--symbol", help="canonical instrument (default engine.yaml instrument)")
+    di.add_argument("--tz", default="UTC",
+                    help="timezone of the file's times: UTC, +02:00, an IANA zone, or mt5_server (mt5.yaml rules)")
+    di.add_argument("--source-name", default="", help="where the file came from (broker, account, export date)")
+    di.add_argument("--price-side", default="bid", choices=["bid", "mid", "ask"])
+    di.add_argument("--layout", choices=["mt5_noheader"], help="force the MT5 no-header layout")
+    di.add_argument("--note", default="")
+    ds_ = sub.add_parser("data-snapshot", help="freeze the downloaded MT5 bars as new dataset versions")
+    ds_.add_argument("--timeframes", help="default M1,M5,M15")
+    ds_.add_argument("--note", default="")
+    dl = sub.add_parser("data-list", help="list dataset versions")
+    dl.add_argument("--timeframe")
+    dsh = sub.add_parser("data-show", help="manifest and quality issues of one dataset version")
+    dsh.add_argument("version_id")
+    dsh.add_argument("--issues", type=int, default=50, help="how many individual issues to print")
+    dv = sub.add_parser("data-verify", help="re-check the checksums of a dataset version")
+    dv.add_argument("version_id")
+    ins = sub.add_parser("instrument", help="show a broker instrument profile from instruments.yaml")
+    ins.add_argument("--profile")
     db = sub.add_parser("dashboard", help="open the local web dashboard")
     db.add_argument("--port", type=int, default=8501)
     return p
@@ -199,6 +229,81 @@ def _context(cfg, store: ParquetStore, canonical: str, at: str | None, point: fl
     from .dashboard.services import snapshot_summary
     print(json.dumps(snapshot_summary(s), indent=2, default=str))
     return 0
+
+
+def _data_cmd(cfg, store: ParquetStore, canonical: str, args: argparse.Namespace) -> int:
+    """Quant Lab data-management commands (no MT5 connection needed)."""
+    from .data.catalog import DatasetCatalog, DatasetNotFound
+    from .mt5.server_time import ServerClock
+    cat = DatasetCatalog(cfg.data.catalog_root(), cfg.data.quality)
+    try:
+        if args.cmd == "instrument":
+            from .instruments import load_instruments
+            spec = load_instruments(args.config).get(args.profile)
+            print(json.dumps({"profile": spec.name, **spec.model_dump(exclude={"name"}),
+                              "money_per_1.0_move_per_lot": spec.money_per_price_unit(1.0),
+                              "not_confirmed_GUESS": spec.guesses(), "warnings": spec.consistency_warnings()},
+                             indent=2))
+            return 0
+        if args.cmd == "data-import":
+            clock = ServerClock.from_config(cfg.mt5.server_time)
+            res = cat.import_csv(args.file, (args.symbol or canonical), args.timeframe, source_tz=args.tz,
+                                 clock=clock, source_name=args.source_name, price_side=args.price_side,
+                                 layout=args.layout, note=args.note)
+            _print_import(res)
+            return 0 if res.quality_ok else 1
+        if args.cmd == "data-snapshot":
+            rc = 0
+            st = cfg.mt5.server_time
+            for tf in _tfs(args.timeframes, [Timeframe.M1, Timeframe.M5, Timeframe.M15]):
+                bars = store.read_bars(canonical, tf)
+                if bars.empty:
+                    print(f"{canonical} {tf.value}: nothing downloaded (run: python -m quant_engine download)")
+                    continue
+                res = cat.import_frame(bars, canonical, tf, source_kind="mt5_store",
+                                       source_name=f"MT5 bars in {store.bars_path(canonical, tf)}",
+                                       settings={"server_time": {"mode": st.mode, "fallback_mode": st.fallback_mode,
+                                                                 "fixed_offset_hours": st.fixed_offset_hours,
+                                                                 "timezone": st.timezone}},
+                                       note=args.note)
+                _print_import(res)
+                rc = rc or (0 if res.quality_ok else 1)
+            return rc
+        if args.cmd == "data-list":
+            df = cat.list(canonical, args.timeframe)
+            print(df.to_string(index=False) if len(df) else "No dataset versions yet. Use data-import or data-snapshot.")
+            return 0
+        if args.cmd == "data-show":
+            m, q = cat.manifest(args.version_id), cat.quality_report(args.version_id)
+            print(json.dumps(m, indent=2))
+            for i in q["issues"][: args.issues]:
+                print(f"{i['severity']:7} {i['kind']:16} {i['time'] or '':27} {i['detail']}")
+            if len(q["issues"]) > args.issues:
+                print(f"... {len(q['issues']) - args.issues} more (use --issues)")
+            return 0
+        if args.cmd == "data-verify":
+            r = cat.verify(args.version_id)
+            print(json.dumps(r))
+            return 0 if r["ok"] else 1
+    except DatasetNotFound as exc:
+        print(f"No dataset version {exc}", file=sys.stderr)
+        return 1
+    except (ValueError, FileNotFoundError, ConfigError) as exc:
+        print(f"Import failed: {exc}", file=sys.stderr)
+        return 1
+    return 2
+
+
+def _print_import(res) -> None:
+    m = res.manifest
+    q = m["quality"]
+    print(json.dumps({"version_id": res.version_id, "new_version": res.created, "rows": m["rows"],
+                      "first_utc": m["first_utc"], "last_utc": m["last_utc"],
+                      "spread_in_source": m["spread_in_source"], "issues": q["counts"],
+                      "blocking_issues": q["blocking"]}, indent=2))
+    if q["blocking"]:
+        print("This version has BLOCKING issues: research will refuse it until you decide. "
+              f"See: python -m quant_engine data-show {res.version_id}")
 
 
 def dukascopy_dataset(canonical: str) -> str:
@@ -334,6 +439,8 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
             return 2
     canonical = cfg.engine.instrument
 
+    if args.cmd.startswith("data-") or args.cmd == "instrument":
+        return _data_cmd(cfg, store, canonical, args)
     if args.cmd == "validate":
         reports = [validate_bars(store.read_bars(canonical, tf), tf, cfg.data.quality,
                                  dataset=f"{canonical} {tf.value}")
