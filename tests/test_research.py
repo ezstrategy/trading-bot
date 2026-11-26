@@ -317,3 +317,39 @@ def test_patterns_cli_h4(config_dir, tmp_path, monkeypatch, planted):
     md = (rep / "report.md").read_text()
     assert "pattern timeframe**: H4 (swing trades" in md and "H4 candles" in md
     assert json.loads((rep / "patterns.json").read_text())["timeframe"] == "H4"
+
+
+# ------------------------------------------------------------------ price action
+def test_engulfing_and_inside_bar_break():
+    m5 = _m5([(4012, 4013, 4009, 4010),     # bearish candle
+              (4009.8, 4014, 4009.5, 4013),  # bullish engulfing
+              (4013, 4020, 4005, 4015),      # mother bar
+              (4015, 4018, 4008, 4012),      # inside bar
+              (4012, 4022, 4011, 4021)])     # closes above the mother bar
+    et = _ev(m5)
+    k = 30
+    assert et.events["bullish engulfing"][k + 1] and not et.events["bearish engulfing"][k + 1]
+    assert et.events["inside bar break up"][k + 4] and not et.events["inside bar break up"][k + 3]
+    assert et.natural["inside bar break down at resistance"] == -1
+
+
+def test_only_price_action_families_are_tested(planted):
+    from quant_engine.research.events import PRICE_ACTION_FAMILIES, event_family
+    rc = CFG.research.model_copy(update={"only_families": list(PRICE_ACTION_FAMILIES), "min_trades_discover": 10})
+    res = mine(_events(planted), rc)
+    assert res.n_tests > 0 and set(res.tested["family"]) <= set(PRICE_ACTION_FAMILIES)
+    assert event_family("bullish engulfing") == "price action"
+    assert event_family("bearish pin at resistance") == "price action at levels"
+
+
+def test_patterns_cli_price_action_since_date(config_dir, tmp_path, monkeypatch, planted):
+    monkeypatch.chdir(tmp_path)
+    store = ParquetStore(tmp_path / "data")
+    for tf in TFS:
+        store.write_bars("XAUUSD", tf, planted[tf])
+    rep = tmp_path / "rep_pa"
+    assert cli.run(["--config", str(config_dir), "patterns", "--timeframe", "H1", "--price-action",
+                    "--start", "2026-08-01", "--out", str(rep)]) == 0
+    md = (rep / "report.md").read_text()
+    assert "idea families tested**: price action, price action at levels" in md
+    assert "period (UTC)**: 2026-08-0" in md      # 2026-08-01 is a Saturday

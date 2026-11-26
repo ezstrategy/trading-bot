@@ -375,6 +375,7 @@ class ResearchConfig(BaseModel):
     news_times_ny: list[str] = Field(default_factory=lambda: ["08:30", "10:00", "14:00"])
     news_spike_atr: float = Field(2.5, gt=0)
     timeframes: dict[str, dict] = Field(default_factory=dict)   # overrides per entry timeframe (H1, H4)
+    only_families: list[str] | None = None   # test only these idea families (None = all)
 
     def for_timeframe(self, tf: str) -> "ResearchConfig":
         """These settings with the overrides for entry timeframe ``tf`` (e.g. H1) applied."""

@@ -130,12 +130,15 @@ def write_report(res: MiningResult, meta: dict, holdout: dict, out: Path) -> str
 
 def run_patterns(cfg: AppConfig, store: ParquetStore, dataset: str, point: float, out_dir: str | Path,
                  start: pd.Timestamp | None = None, end: pd.Timestamp | None = None,
-                 source_note: str = "", backtest: bool = True, timeframe: str = "M5") -> dict:
+                 source_note: str = "", backtest: bool = True, timeframe: str = "M5",
+                 only_families: list[str] | None = None) -> dict:
     """Mine ``dataset`` on ``timeframe`` candles (M5 scalps, or H1 / H4 swings) and write the
     report files into ``out_dir``. Returns a summary dict."""
     sc = cfg.strategy
     tf = Timeframe.parse(timeframe)
     rc = sc.research.for_timeframe(tf.value)
+    if only_families:
+        rc = rc.model_copy(update={"only_families": list(only_families)})
     bars = {tf: store.read_bars(dataset, tf, start, end) for tf in STRUCTURE_TFS}
     missing = [tf.value for tf, b in bars.items() if b.empty]
     if missing:
@@ -181,6 +184,7 @@ def run_patterns(cfg: AppConfig, store: ParquetStore, dataset: str, point: float
         f"{tf.value} candles": f"{len(entry):,}",
         "time in each market (H4)": ", ".join(f"{k} {v:.0%}" for k, v in regime_share.items()),
         f"{tf.value} data quality issues": quality.counts() or "none",
+        "idea families tested": ", ".join(rc.only_families) if rc.only_families else "all",
         "spread": (f"fixed {rc.fixed_spread_points:g} points in every year" if rc.fixed_spread_points is not None
                    else f"from the bars ({sc.backtest.assumed_spread_points:g} points when missing)"),
     }

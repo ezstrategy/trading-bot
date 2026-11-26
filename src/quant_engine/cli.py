@@ -92,6 +92,8 @@ def build_parser() -> argparse.ArgumentParser:
     pt.add_argument("--point", type=float, default=0.01, help="tick size (XAUUSD: 0.01)")
     pt.add_argument("--timeframe", choices=["M5", "H1", "H4"], default="M5",
                     help="M5 = scalps; H1 / H4 = swing trades with bigger stops and targets")
+    pt.add_argument("--price-action", action="store_true",
+                    help="test only price-action setups (pin bars, engulfing, inside bars, at levels or not)")
     pt.add_argument("--out", help="report folder (default reports/patterns_<source>_<timeframe>_<time>)")
     rn = sub.add_parser("run", help="live signal engine: watch MT5, send signals to Telegram (never trades)")
     rn.add_argument("--dry-run", action="store_true", help="print messages instead of sending to Telegram")
@@ -193,7 +195,9 @@ def _patterns(cfg, store: ParquetStore, canonical: str, args: argparse.Namespace
     end = pd.Timestamp(args.end, tz="UTC") if args.end else None
     out = args.out or f"reports/patterns_{args.source}_{args.timeframe}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
     try:
-        summary = run_patterns(cfg, store, ds, args.point, out, start, end, note, timeframe=args.timeframe)
+        from .research.events import PRICE_ACTION_FAMILIES
+        summary = run_patterns(cfg, store, ds, args.point, out, start, end, note, timeframe=args.timeframe,
+                               only_families=list(PRICE_ACTION_FAMILIES) if args.price_action else None)
     except ValueError as exc:
         hint = "python -m quant_engine dukascopy --days 365" if args.source == "dukascopy" \
             else "python -m quant_engine download --days 365"

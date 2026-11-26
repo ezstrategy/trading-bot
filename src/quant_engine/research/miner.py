@@ -111,8 +111,10 @@ class MiningResult:
     n_tests: int
 
 
-def _conditions(et: EventTable):
+def _conditions(et: EventTable, only: list[str] | None = None):
     for name, mask in et.events.items():
+        if only and event_family(name) not in only:
+            continue
         for reg in REGIMES:
             base = mask & (et.regime == reg) & ~et.blocked
             sessions = ("any",) if name in et.hour_events else SESSIONS
@@ -129,7 +131,7 @@ def mine(et: EventTable, rc: ResearchConfig) -> MiningResult:
     exits = [(d, sl, tp, hz) for d in (1, -1) for sl in rc.sl_atr for tp in rc.tp_atr for hz in rc.horizons]
     outcomes = {k: trade_outcomes(et.times, et.o, et.h, et.l, et.c, et.spread, et.atr, *k, tf=et.tf) for k in exits}
     rows, trade_sets = [], {}
-    for name, reg, sess, m in _conditions(et):
+    for name, reg, sess, m in _conditions(et, rc.only_families):
         idx = np.nonzero(m)[0]
         disc_idx = idx[idx < split]
         if len(disc_idx) < rc.min_trades_discover:

@@ -160,6 +160,7 @@ def build_events(m5: pd.DataFrame, h4: pd.DataFrame, rc: ResearchConfig, session
     nat["range bottom touch"] = 1
 
     _levels_and_news(ev, nat, t, o, h, l, c, a, valid, rc, tf)
+    _price_action(ev, nat, o, h, l, c, a, valid, rc, tf)
 
     for k in ev:
         ev[k] = np.nan_to_num(ev[k], nan=False).astype(bool)
@@ -246,14 +247,60 @@ def _levels_and_news(ev: dict, nat: dict, t: pd.DatetimeIndex, o, h, l, c, a, va
     ev["NFP spike down"], nat["NFP spike down"] = nfp & (c < o), -1
 
 
+def _price_action(ev: dict, nat: dict, o, h, l, c, a, valid, rc: ResearchConfig,
+                  tf: Timeframe = Timeframe.M5) -> None:
+    """Candle patterns, anywhere and at key levels.
+
+    * ``bullish / bearish pin``: long rejection wick (see :func:`_pins`).
+    * ``bullish / bearish engulfing``: the candle's body swallows the previous opposite body and
+      is at least ``pin_min_atr`` / 2 ATR long.
+    * ``inside bar break up / down``: the previous candle sat inside the one before (the mother
+      bar) and this candle closes above / below the mother bar.
+    * ``... at support / resistance``: the same with the candle's low (high) within
+      ``level_touch_atr`` ATR of the shortest ``level_days`` low (high) or touching a round number.
+    """
+    bull_pin, bear_pin = _pins(o, h, l, c, a, rc)
+    po, pc = np.concatenate([[np.nan], o[:-1]]), np.concatenate([[np.nan], c[:-1]])
+    body = np.abs(c - o)
+    big = body >= 0.5 * rc.pin_min_atr * a
+    bull_eng = big & (c > o) & (pc < po) & (o <= pc) & (c >= po)
+    bear_eng = big & (c < o) & (pc > po) & (o >= pc) & (c <= po)
+    h1, l1 = np.concatenate([[np.nan], h[:-1]]), np.concatenate([[np.nan], l[:-1]])
+    h2, l2 = np.concatenate([[np.nan] * 2, h[:-2]]), np.concatenate([[np.nan] * 2, l[:-2]])
+    inside_prev = (h1 <= h2) & (l1 >= l2)
+    ib_up, ib_dn = inside_prev & (c > h2), inside_prev & (c < l2)
+
+    n = min(rc.level_days) * (1440 // tf.minutes)
+    lo, hi = _prior_extreme(l, n, "min"), _prior_extreme(h, n, "max")
+    near = rc.level_touch_atr * a
+    step = min(rc.round_steps)
+    at_sup = (l <= lo + near) | (np.ceil(l / step) * step <= np.minimum(o, c))
+    at_res = (h >= hi - near) | (np.floor(h / step) * step >= np.maximum(o, c))
+
+    for name, mask, d in (("bullish pin", bull_pin, 1), ("bearish pin", bear_pin, -1),
+                          ("bullish engulfing", bull_eng, 1), ("bearish engulfing", bear_eng, -1),
+                          ("inside bar break up", ib_up, 1), ("inside bar break down", ib_dn, -1)):
+        ev[name], nat[name] = valid & mask, d
+    for name, mask, d in (("bullish pin at support", bull_pin & at_sup, 1),
+                          ("bearish pin at resistance", bear_pin & at_res, -1),
+                          ("bullish engulfing at support", bull_eng & at_sup, 1),
+                          ("bearish engulfing at resistance", bear_eng & at_res, -1),
+                          ("inside bar break up at support", ib_up & at_sup, 1),
+                          ("inside bar break down at resistance", ib_dn & at_res, -1)):
+        ev[name], nat[name] = valid & mask, d
+
+
+PRICE_ACTION_FAMILIES = ("price action", "price action at levels")
+
+
 def event_family(name: str) -> str:
     """Group an event name into an idea family (for the report)."""
     if name.startswith("hour "):
         return "time of day"
     if "news" in name or "NFP" in name:
         return "news shocks"
-    if "pin" in name:
-        return "price action at levels"
+    if any(k in name for k in ("pin", "engulfing", "inside bar")):
+        return "price action at levels" if " at " in name else "price action"
     if name.startswith("round "):
         return "round numbers"
     if name.endswith(("d high", "d low")) or "prev-day" in name:
