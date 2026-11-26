@@ -521,3 +521,47 @@ def test_entries_report_shows_vwap_before_marked_entries(config_dir, tmp_path, m
     assert {"vwap reclaim", "vwap band sweep", "with vwap", "discount"} & set(cand["filter"])
     assert "vs_vwap_sd" in pd.read_csv(rep / "signals.csv").columns
     assert len(pd.read_csv(rep / "vwap_buckets.csv")) == 24
+
+
+# ------------------------------------------------------------------ public strategies
+def test_walk_stop_before_target_and_spread_on_sells():
+    from quant_engine.research.classics import _walk
+    o = np.array([100.0, 100, 100]); h = np.array([100.0, 103, 100]); l = np.array([100.0, 98, 100])
+    c = np.array([100.0, 100, 100])
+    assert _walk(1, 2, 1, 100.0, 99.0, 102.0, o, h, l, c, 0.1) == (1, 99.0)      # both touched: stop first
+    j, px = _walk(2, 2, -1, 100.0, 101.0, 98.0, o, h, l, c, 0.1)                   # time exit pays the ask
+    assert j == 2 and px == pytest.approx(100.1)
+
+
+def test_opening_range_follows_first_candle_and_targets_10r():
+    from quant_engine.research.classics import opening_range
+    # 09:30 NY = 13:30 UTC in June; first candle green (stop 4009), then price runs up 10R
+    rows = [(4010, 4010.5, 4009.5, 4010)] * 6 + [(4010, 4012, 4009, 4011.5)] + \
+           [(4011.5 + k, 4012.5 + k * 1.5, 4011 + k, 4012 + k * 1.5) for k in range(30)]
+    m5 = _m5(rows, start="2026-06-02 13:00")
+    tr = opening_range(m5, 0.08, CFG.sessions, 9 * 60 + 30)
+    assert len(tr) == 1 and tr[0]["side"] == "BUY" and tr[0]["stop"] == 4009
+    assert tr[0]["r"] == pytest.approx(10.0)
+
+
+def test_session_hold_buys_at_ask_sells_next_open():
+    from quant_engine.research.classics import session_hold
+    t = pd.date_range("2026-06-02 19:55", "2026-06-03 13:35", freq="5min", tz="UTC")
+    m5 = pd.DataFrame({"time": t, "open": np.linspace(100, 110, len(t))})
+    tr = session_hold(m5, 0.1, 16 * 60, 9 * 60 + 30)       # 20:00 UTC -> 13:30 UTC (summer)
+    assert len(tr) == 1 and tr[0]["entry_time"] == pd.Timestamp("2026-06-02 20:00", tz="UTC")
+    assert tr[0]["exit_time"] == pd.Timestamp("2026-06-03 13:30", tz="UTC") and tr[0]["ret_pct"] > 0
+
+
+def test_classics_cli_writes_ranked_report(config_dir, tmp_path, monkeypatch, planted):
+    monkeypatch.chdir(tmp_path)
+    store = ParquetStore(tmp_path / "data")
+    for tf in TFS:
+        store.write_bars("XAUUSD", tf, planted[tf])
+    rep = tmp_path / "cl"
+    assert cli.run(["--config", str(config_dir), "classics", "--start", "2026-01-01", "--out", str(rep)]) == 0
+    md = (rep / "report.md").read_text()
+    assert "Public gold strategies" in md and "just holding gold" in md and "Where each rule comes from" in md
+    s = pd.read_csv(rep / "summary.csv")
+    assert len(s) == 9 and set(s["verdict"]) <= {"profitable (proven)", "profitable (not proven)", "mixed", "loses"}
+    assert (rep / "trades_london_breakout__asian_range.csv").exists()
