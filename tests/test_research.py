@@ -565,3 +565,37 @@ def test_classics_cli_writes_ranked_report(config_dir, tmp_path, monkeypatch, pl
     s = pd.read_csv(rep / "summary.csv")
     assert len(s) == 9 and set(s["verdict"]) <= {"profitable (proven)", "profitable (not proven)", "mixed", "loses"}
     assert (rep / "trades_london_breakout__asian_range.csv").exists()
+
+
+def test_london_breakout_trend_filter_and_mid_stop_change_trades(planted):
+    from quant_engine.research.classics import lb_day_groups, london_breakout
+    from quant_engine.research.events import regime_per_bar
+    from quant_engine.research.model import regime_kwargs
+    from quant_engine.strategy.regime import trend_regime_series
+    m5, h4 = planted[Timeframe.M5], planted[Timeframe.H4]
+    g = lb_day_groups(m5, CFG.sessions)
+    reg = regime_per_bar(pd.DatetimeIndex(m5["time"]), h4, trend_regime_series(h4, **regime_kwargs(CFG)))
+    base = pd.DataFrame(london_breakout(m5, 0.08, CFG.sessions, None, reg, g))
+    assert len(base) == len(london_breakout(m5, 0.08, CFG.sessions))        # same as the published default
+    mid = pd.DataFrame(london_breakout(m5, 0.08, CFG.sessions, {"stop": "mid"}, reg, g))
+    assert (mid["side"].map({"BUY": 1, "SELL": -1}) * (mid["entry"] - mid["stop"]) > 0).all()
+    withtr = pd.DataFrame(london_breakout(m5, 0.08, CFG.sessions, {"trend": "with"}, reg, g))
+    assert len(withtr) < len(base)
+    late = pd.DataFrame(london_breakout(m5, 0.08, CFG.sessions, {"close_min": 11 * 60}, reg, g))
+    from quant_engine.features.sessions import ny_minutes
+    assert (ny_minutes(pd.DatetimeIndex(late["exit_time"])) < 11 * 60).all()
+
+
+def test_london_cli_report(config_dir, tmp_path, monkeypatch, planted):
+    monkeypatch.chdir(tmp_path)
+    store = ParquetStore(tmp_path / "data")
+    for tf in TFS:
+        store.write_bars("XAUUSD", tf, planted[tf])
+    rep = tmp_path / "lo"
+    assert cli.run(["--config", str(config_dir), "london", "--start", "2026-01-01", "--min-trades", "20",
+                    "--out", str(rep)]) == 0
+    md = (rep / "report.md").read_text()
+    assert "Published rules vs the best version" in md and "Each change on its own" in md
+    assert "(published)" in md and "Year by year" in md
+    assert "past the 17:00 New York rollover (swap)**: 0" in md
+    assert len(pd.read_csv(rep / "versions.csv")) == 360

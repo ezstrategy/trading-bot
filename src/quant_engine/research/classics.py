@@ -94,24 +94,39 @@ def _days(t: pd.DatetimeIndex, cfg) -> np.ndarray:
     return pd.Series(trading_day(t, cfg)).factorize()[0]
 
 
-def london_breakout(m5: pd.DataFrame, sp: float, cfg) -> list[dict]:
-    """Asian-range breakout with stop orders (see SOURCES)."""
+LB_DEFAULT = {"target_r": 2.5, "be_r": 1.5, "close_min": LB_CLOSE, "range_filter": True,
+              "stop": "range", "trend": "none", "buffer": LB_BUFFER}
+
+
+def london_breakout(m5: pd.DataFrame, sp: float, cfg, params: dict | None = None,
+                    regime: np.ndarray | None = None, day_groups: list[np.ndarray] | None = None) -> list[dict]:
+    """Asian-range breakout with stop orders (see SOURCES). ``params`` overrides :data:`LB_DEFAULT`:
+    ``target_r``, ``be_r`` (None = no break-even), ``close_min`` (NY minutes), ``range_filter``
+    (0.30-1.60% of price), ``stop`` ("range" = other side, "mid" = middle of the range),
+    ``trend`` ("none", "with" = only the H4 market direction, neutral days trade both ways)."""
+    p = {**LB_DEFAULT, **(params or {})}
     t = pd.DatetimeIndex(m5["time"])
     o, h, l, c = (m5[k].to_numpy(float) for k in ("open", "high", "low", "close"))
-    mins, day = ny_minutes(t), _days(t, cfg)
+    mins = ny_minutes(t)
     in_range = (mins >= LB_RANGE[0]) | (mins < LB_RANGE[1])
-    active = (mins >= LB_RANGE[1]) & (mins < LB_CLOSE)
+    active = (mins >= LB_RANGE[1]) & (mins < p["close_min"])
+    if day_groups is None:
+        day_groups = lb_day_groups(m5, cfg)
     out = []
-    for d in np.unique(day):
-        idx = np.nonzero(day == d)[0]
+    for idx in day_groups:
         r_idx, a_idx = idx[in_range[idx]], idx[active[idx]]
         if len(r_idx) < 50 or not len(a_idx):
             continue
         hi, lo = h[r_idx].max(), l[r_idx].min()
         px = c[r_idx[-1]]
-        if not 0.003 <= (hi - lo) / px <= 0.016:
+        if p["range_filter"] and not 0.003 <= (hi - lo) / px <= 0.016:
             continue
-        buy_lvl, sell_lvl = hi + LB_BUFFER * px, lo - LB_BUFFER * px
+        allowed = {1, -1}
+        if p["trend"] == "with" and regime is not None:
+            rg = regime[r_idx[-1]]
+            allowed = {1} if rg == "bullish" else {-1} if rg == "bearish" else {1, -1}
+        buy_lvl, sell_lvl = hi + p["buffer"] * px, lo - p["buffer"] * px
+        mid = (hi + lo) / 2
         end_i = a_idx[-1]
         for i in a_idx:
             up, dn = h[i] + sp >= buy_lvl, l[i] <= sell_lvl
@@ -120,20 +135,30 @@ def london_breakout(m5: pd.DataFrame, sp: float, cfg) -> list[dict]:
             if up and dn:       # both in one candle: take the side nearer the open
                 up = abs(buy_lvl - o[i] - sp) <= abs(o[i] - sell_lvl)
             side = 1 if up else -1
+            if side not in allowed:
+                break           # OCO: the first breakout decides the day
             if side == 1:
                 entry = max(buy_lvl, o[i] + sp)
-                stop = max(lo, entry * (1 - 0.006))
+                stop = max(lo if p["stop"] == "range" else mid, entry * (1 - 0.006))
             else:
                 entry = min(sell_lvl, o[i])
-                stop = min(hi + sp, entry * (1 + 0.006))
+                stop = min((hi if p["stop"] == "range" else mid) + sp, entry * (1 + 0.006))
             risk = abs(entry - stop)
-            if risk <= 0:
+            if risk <= 0 or (entry - stop) * side <= 0:
                 break
-            tgt = entry + side * 2.5 * risk
-            j, px_out = _walk(i, end_i, side, entry, stop, tgt, o, h, l, c, sp, be_r=1.5, fill_bar_target=False)
+            tgt = entry + side * p["target_r"] * risk
+            j, px_out = _walk(i, end_i, side, entry, stop, tgt, o, h, l, c, sp, be_r=p["be_r"],
+                              fill_bar_target=False)
             out.append(_trade(t, i, j, side, entry, px_out, stop))
             break
     return out
+
+
+def lb_day_groups(m5: pd.DataFrame, cfg) -> list[np.ndarray]:
+    """Candle indices of each trading day (17:00-17:00 New York)."""
+    day = _days(pd.DatetimeIndex(m5["time"]), cfg)
+    bounds = np.r_[0, np.nonzero(np.diff(day))[0] + 1, len(day)]
+    return [np.arange(a, b) for a, b in zip(bounds[:-1], bounds[1:])]
 
 
 def opening_range(m5: pd.DataFrame, sp: float, cfg, start_min: int, close_min: int = 16 * 60) -> list[dict]:
