@@ -53,11 +53,10 @@ experiments / validation / MT5 / audit / CLI 10, dashboard 2), 4 min 57 s.
 
 ## Outstanding issues
 
-1. **The GTC-SBR test period may already be used.** The other thread's `gtc` run on your PC reports
-   the last 20% of 2020+ ("out-of-sample"). The Quant Lab split of `gtc_sbr_2020` covers the same
-   last 20%. Once you read that report, GTC-SBR v1.0.0's test period is no longer untouched.
-   I recommend recording that as one test use (`lab-note`), and treating forward paper trading as
-   the clean test for any GTC-SBR change.
+1. **GTC-SBR test period: untouched.** The other thread withdrew its queued `gtc` run before it
+   started (2026-11-26), so the last 20% of 2020+ has not been looked at for GTC-SBR. GTC-SBR testing
+   now happens only in the Quant Lab (programme `gtc_sbr_2020`); the test period stays locked until
+   the final `--final-test` run.
 2. No historical news calendar: GTC-SBR still blocks fixed New York release slots every weekday.
 3. The live Telegram engine still runs the older three-mode model; plug-in strategies are not yet
    wired to live signals (not part of this spec; can be added once a strategy is validated).
