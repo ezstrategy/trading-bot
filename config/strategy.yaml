@@ -164,6 +164,19 @@ research:
       sweep_lookbacks: [6, 30]    # last 1 day / 5 days
       move_bars: 3
       range_bars: 12
+  costs:                     # charged in every research backtest (rulebook rule 6)
+    min_spread_points: 8       # floor under the historical bar spread ($0.08, owner's broker)
+    commission_per_lot: 0      # USD per lot round trip (owner confirmed 0 on 2026-11-26)
+    contract_size: 100         # 1 lot = 100 oz
+    slippage_points: 2         # per side on market / stop fills ($0.02). GUESS
+  regime4:                   # bullish / bearish / sideways / uncertain on H4 (rulebook rule 4)
+    ema_period: 50
+    slope_bars: 10
+    trend_slope_atr: 0.5       # GUESS
+    confirm_bars: 2
+    flat_slope_atr: 0.2        # GUESS
+    range_bars: 30
+    range_max_atr: 8.0         # GUESS
   bigmoves:                  # python -m quant_engine bigmoves (30-50 pip moves within 30 minutes)
     pip_usd: 0.10            # gold: 1 pip = $0.10, so 30 pips = $3
     move_pips: [30, 50]

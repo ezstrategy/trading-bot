@@ -339,6 +339,25 @@ class BacktestConfig(BaseModel):
     regime_min_slope_atr: float = Field(0.5, ge=0)
 
 
+class CostsConfig(BaseModel):
+    """Trading costs charged in research backtests (rulebook rule 6)."""
+    min_spread_points: float = Field(8.0, ge=0)        # floor under the historical bar spread (owner: $0.08)
+    commission_per_lot: float = Field(0.0, ge=0)       # USD per lot, round trip (owner: 0, 2026-11-26)
+    contract_size: float = Field(100.0, gt=0)          # XAUUSD: 1 lot = 100 oz
+    slippage_points: float = Field(2.0, ge=0)          # per side on market / stop fills. GUESS
+
+
+class Regime4Config(BaseModel):
+    """Four-state H4 regime (rulebook rule 4). All values in H4 candles / H4 ATR(14)."""
+    ema_period: int = Field(50, ge=5)
+    slope_bars: int = Field(10, ge=2)
+    trend_slope_atr: float = Field(0.5, gt=0)          # EMA rise over slope_bars for a trend. GUESS
+    confirm_bars: int = Field(2, ge=1)                 # trend must hold this many H4 closes in a row
+    flat_slope_atr: float = Field(0.2, ge=0)           # |EMA change| below this = flat. GUESS
+    range_bars: int = Field(30, ge=5)                  # sideways: the last range_bars H4 candles ...
+    range_max_atr: float = Field(8.0, gt=0)            # ... span at most this many ATR. GUESS
+
+
 class ResearchConfig(BaseModel):
     """Pattern mining (``python -m quant_engine patterns``). Distances are in M5 ATR(14).
 
@@ -377,6 +396,8 @@ class ResearchConfig(BaseModel):
     timeframes: dict[str, dict] = Field(default_factory=dict)   # overrides per entry timeframe (H1, H4)
     only_families: list[str] | None = None   # test only these idea families (None = all)
     exit_units: Literal["atr", "usd"] = "atr"   # usd: sl_atr / tp_atr are dollar distances
+    costs: CostsConfig = Field(default_factory=CostsConfig)
+    regime4: Regime4Config = Field(default_factory=Regime4Config)
     bigmoves: dict = Field(default_factory=lambda: {
         "pip_usd": 0.10, "move_pips": [30, 50], "window_bars": 6,
         "target_pips": [30, 50], "stop_pips": [20, 30, 50]})
