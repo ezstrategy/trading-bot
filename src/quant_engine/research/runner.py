@@ -58,6 +58,22 @@ def _ist_hint(event: str) -> str:
     return ""
 
 
+def family_summary(tested: pd.DataFrame) -> pd.DataFrame:
+    """Per idea family: how many candidates looked significant vs what luck alone gives."""
+    if tested is None or tested.empty or "family" not in tested:
+        return pd.DataFrame()
+    g = tested.groupby("family")
+    out = pd.DataFrame({
+        "candidates": g.size(),
+        "p_below_0.05": g["p"].apply(lambda x: int((x < 0.05).sum())),
+        "best_avg_r": g["avg_r"].max().round(3),
+        "median_avg_r": g["avg_r"].median().round(3),
+    })
+    out["expected_by_luck"] = (out["candidates"] * 0.05).round(1)
+    out["share_pct"] = (100 * out["p_below_0.05"] / out["candidates"]).round(1)
+    return out.reset_index().sort_values("share_pct", ascending=False)
+
+
 def write_report(res: MiningResult, meta: dict, holdout: dict, out: Path) -> str:
     """Plain-language report (also returned)."""
     s = res.survivors
@@ -93,6 +109,11 @@ def write_report(res: MiningResult, meta: dict, holdout: dict, out: Path) -> str
            _table(pd.DataFrame([holdout]), list(holdout.keys())) if holdout else "_no signals_\n"]
     if holdout and holdout.get("trades", 0) < 30:
         md.append("> Fewer than 30 trades: too few to judge.\n")
+    md += ["\n## Each idea family: more than luck?\n",
+           "If an idea family had no real edge, about 5% of its candidates would still show p < 0.05 by "
+           "luck alone. A family well above 5% hints at something real; near 5% means noise.\n",
+           _table(family_summary(res.tested), ["family", "candidates", "p_below_0.05", "expected_by_luck",
+                                               "share_pct", "best_avg_r", "median_avg_r"])]
     md += ["\n## Best leads that did not pass (information only, not proven)\n",
            _table(res.leads, ["regime", "side", "event", "session", "tp_atr", "horizon", "trades",
                               "avg_r", "p", "bh_pass", "positive_thirds", "val_trades", "val_avg_r"]),
@@ -154,7 +175,8 @@ def run_patterns(cfg: AppConfig, store: ParquetStore, dataset: str, point: float
         "M5 candles": f"{len(m5):,}",
         "time in each market (H4)": ", ".join(f"{k} {v:.0%}" for k, v in regime_share.items()),
         "M5 data quality issues": quality.counts() or "none",
-        "spread when missing": f"{sc.backtest.assumed_spread_points:g} points",
+        "spread": (f"fixed {rc.fixed_spread_points:g} points in every year" if rc.fixed_spread_points is not None
+                   else f"from the bars ({sc.backtest.assumed_spread_points:g} points when missing)"),
     }
     write_report(res, meta, holdout, out)
     summary = {"tested": res.n_tests, "passed_discovery": int(len(res.survivors)),

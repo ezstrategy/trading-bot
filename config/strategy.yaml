@@ -143,3 +143,11 @@ research:
   max_patterns: 20
   use_verdicts: [confirmed]  # which patterns `mode: patterns` may signal from
   patterns_file: reports/patterns_latest.json
+  fixed_spread_points: 20    # one realistic spread (0.20 USD) for every year; broker spreads were 40 pts in 2015, ~5 in 2021
+  round_steps: [50, 100]     # round-number levels: 4000, 4050, 4100 ...
+  level_days: [5, 20]        # major support / resistance: the 5-day and 20-day high and low
+  pin_wick_ratio: 0.6        # price action: pin bar = rejection wick >= 60% of the candle ...
+  pin_min_atr: 1.0           # ... and candle range >= 1 ATR
+  level_touch_atr: 0.25      # "at a level" = within 0.25 ATR of it
+  news_times_ny: ["08:30", "10:00", "14:00"]   # US data / FOMC release times (New York clock)
+  news_spike_atr: 2.5        # news shock: the release candle is >= 2.5 ATR long

@@ -13,6 +13,8 @@ Events (all distances in M5 ATR(14)):
 * ``big move up / down``: price moved a lot in the last hour (first candle that qualifies).
 * ``range top / bottom touch``: inside a 4-hour range of normal width, price reaches the
   top (bottom) 10% without breaking it.
+* Major levels, round numbers ($50 / $100), pin bars at them and news shocks: see
+  :func:`_levels_and_news`.
 
 Each event has a ``natural`` direction (+1 for the bullish-looking ones), so a BUY after an
 up event is "continuation" and a SELL after it is "reversal".
@@ -79,6 +81,8 @@ def build_events(m5: pd.DataFrame, h4: pd.DataFrame, rc: ResearchConfig, session
     o, h, l, c = (m5[k].to_numpy(dtype="float64") for k in ("open", "high", "low", "close"))
     sp_pts = m5["spread"].to_numpy(dtype="float64") if "spread" in m5 else np.full(len(c), np.nan)
     sp_pts = np.where(np.isnan(sp_pts) | (sp_pts <= 0), assumed_spread_points, sp_pts)
+    if rc.fixed_spread_points is not None:   # same cost in every year (broker spreads changed a lot)
+        sp_pts = np.full(len(c), float(rc.fixed_spread_points))
     a = atr_fn(m5, 14).to_numpy(dtype="float64")
     regimes = trend_regime_series(h4, **(regime_kw or {}))
     ev: dict[str, np.ndarray] = {}
@@ -151,9 +155,105 @@ def build_events(m5: pd.DataFrame, h4: pd.DataFrame, rc: ResearchConfig, session
     ev["range bottom touch"] = ok & (l <= rlo + rc.range_edge * width) & (l >= rlo)
     nat["range bottom touch"] = 1
 
+    _levels_and_news(ev, nat, t, o, h, l, c, a, valid, rc)
+
     for k in ev:
         ev[k] = np.nan_to_num(ev[k], nan=False).astype(bool)
     return EventTable(times=t, o=o, h=h, l=l, c=c, spread=sp_pts * point, atr=a,
                       regime=regime_per_bar(t, h4, regimes), session=session_labels(t, sessions),
                       blocked=new_signals_blocked(t, sessions), events=ev, natural=nat,
                       hour_events=frozenset(hour_names))
+
+
+def _pins(o, h, l, c, a, rc: ResearchConfig) -> tuple[np.ndarray, np.ndarray]:
+    """(bullish pin, bearish pin): long lower / upper rejection wick on a candle >= pin_min_atr."""
+    rng = h - l
+    big = rng >= rc.pin_min_atr * a
+    safe = np.where(rng > 0, rng, np.nan)
+    lower = (np.minimum(o, c) - l) / safe
+    upper = (h - np.maximum(o, c)) / safe
+    return big & (lower >= rc.pin_wick_ratio), big & (upper >= rc.pin_wick_ratio)
+
+
+def _levels_and_news(ev: dict, nat: dict, t: pd.DatetimeIndex, o, h, l, c, a, valid, rc: ResearchConfig) -> None:
+    """Major support / resistance, round numbers, price action at them, and news shocks.
+
+    * ``round N support / resistance``: the candle wicks through a multiple of N USD and
+      closes back on the side it opened (a rejection of the round number).
+    * ``round N break up / down``: the close crosses a multiple of N USD.
+    * ``bullish / bearish pin at round``: pin bar whose wick touches a round number.
+    * ``swept / broke Nd high / low``: the N-day high or low (major S/R) is swept and
+      rejected, or closed through. ``bullish / bearish pin at Nd low / high``: a pin bar
+      within ``level_touch_atr`` of that level.
+    * ``news spike up / down``: the M5 candle opening at a US release time (New York clock)
+      is >= ``news_spike_atr`` x the previous ATR. ``NFP spike up / down``: the same on the
+      first Friday of the month at 08:30 New York.
+    """
+    bull_pin, bear_pin = _pins(o, h, l, c, a, rc)
+    smallest = min(rc.round_steps)
+    for step in rc.round_steps:
+        s = f"{step:g}"
+        lvl_hi = np.floor(h / step) * step          # highest round level at or below the high
+        lvl_lo = np.ceil(l / step) * step           # lowest round level at or above the low
+        res = valid & (lvl_hi > np.maximum(o, c)) & (lvl_hi <= h)
+        sup = valid & (lvl_lo < np.minimum(o, c)) & (lvl_lo >= l)
+        ev[f"round {s} resistance"], nat[f"round {s} resistance"] = res, -1
+        ev[f"round {s} support"], nat[f"round {s} support"] = sup, 1
+        prev_c = np.concatenate([[np.nan], c[:-1]])
+        up = valid & (np.floor(c / step) > np.floor(prev_c / step))
+        dn = valid & (np.floor(c / step) < np.floor(prev_c / step))
+        ev[f"round {s} break up"], nat[f"round {s} break up"] = up, 1
+        ev[f"round {s} break down"], nat[f"round {s} break down"] = dn, -1
+        if step == smallest:
+            touch_lo = np.ceil(l / step) * step <= np.minimum(o, c)
+            touch_hi = np.floor(h / step) * step >= np.maximum(o, c)
+            ev["bullish pin at round"], nat["bullish pin at round"] = valid & bull_pin & touch_lo, 1
+            ev["bearish pin at round"], nat["bearish pin at round"] = valid & bear_pin & touch_hi, -1
+
+    bars_per_day = 288
+    for days in rc.level_days:
+        n = days * bars_per_day
+        lo, hi = _prior_extreme(l, n, "min"), _prior_extreme(h, n, "max")
+        d = f"{days}d"
+        ev[f"swept {d} low"], nat[f"swept {d} low"] = valid & (l < lo) & (c > lo), 1
+        ev[f"swept {d} high"], nat[f"swept {d} high"] = valid & (h > hi) & (c < hi), -1
+        ev[f"broke {d} high"], nat[f"broke {d} high"] = valid & _first(c > hi), 1
+        ev[f"broke {d} low"], nat[f"broke {d} low"] = valid & _first(c < lo), -1
+        near = rc.level_touch_atr * a
+        ev[f"bullish pin at {d} low"] = valid & bull_pin & (l <= lo + near) & (c > lo)
+        nat[f"bullish pin at {d} low"] = 1
+        ev[f"bearish pin at {d} high"] = valid & bear_pin & (h >= hi - near) & (c < hi)
+        nat[f"bearish pin at {d} high"] = -1
+
+    ny = t.tz_convert("America/New_York")
+    mins = np.asarray(ny.hour * 60 + ny.minute)
+    release = np.zeros(len(c), dtype=bool)
+    for hhmm in rc.news_times_ny:
+        hh, mm = (int(x) for x in hhmm.split(":"))
+        release |= mins == hh * 60 + mm
+    prev_atr = np.concatenate([[np.nan], a[:-1]])
+    shock = valid & release & ((h - l) >= rc.news_spike_atr * prev_atr)
+    ev["news spike up"], nat["news spike up"] = shock & (c > o), 1
+    ev["news spike down"], nat["news spike down"] = shock & (c < o), -1
+    nfp = valid & (np.asarray(ny.weekday) == 4) & (np.asarray(ny.day) <= 7) & (mins == 8 * 60 + 30)
+    ev["NFP spike up"], nat["NFP spike up"] = nfp & (c > o), 1
+    ev["NFP spike down"], nat["NFP spike down"] = nfp & (c < o), -1
+
+
+def event_family(name: str) -> str:
+    """Group an event name into an idea family (for the report)."""
+    if name.startswith("hour "):
+        return "time of day"
+    if "news" in name or "NFP" in name:
+        return "news shocks"
+    if "pin" in name:
+        return "price action at levels"
+    if name.startswith("round "):
+        return "round numbers"
+    if name.endswith(("d high", "d low")) or "prev-day" in name:
+        return "major support / resistance"
+    if name.startswith(("impulse", "big move")):
+        return "momentum"
+    if name.startswith("range "):
+        return "range edges"
+    return "intraday sweeps / breakouts"

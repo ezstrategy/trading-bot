@@ -125,6 +125,11 @@ python -m quant_engine patterns --source mt5      # report in reports/patterns_m
   breakouts, impulse candles, big 1-hour moves and range-edge touches, each x market type x
   session x BUY/SELL x exit rule (stop, target and time limit in M5 ATR). Settings: `research:`
   in `config/strategy.yaml`.
+- Also: round-number levels ($50 / $100 handles) rejected or broken, 5-day and 20-day highs/lows
+  (major support / resistance) swept or broken, pin bars at those levels, and big candles at US
+  release times (08:30 / 10:00 / 14:00 New York, NFP Fridays). One fixed spread (20 points) is
+  charged in every year by default. The report shows, per idea family, how many candidates looked
+  significant versus what luck alone would give.
 - Found on the older 60% of the history only, with a Benjamini-Hochberg false-discovery
   filter across all candidates, a minimum edge after spread and a stability check.
 - Checked on the newer 40% it never saw: `confirmed`, `held up (not proven)`, `failed`.

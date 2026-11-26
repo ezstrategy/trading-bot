@@ -366,8 +366,16 @@ class ResearchConfig(BaseModel):
     max_patterns: int = Field(20, ge=1)
     use_verdicts: list[str] = Field(default_factory=lambda: ["confirmed"])
     patterns_file: str = "reports/patterns_latest.json"
+    fixed_spread_points: float | None = Field(None, ge=0)   # one spread for every year (None = bar spreads)
+    round_steps: list[float] = Field(default_factory=lambda: [50.0, 100.0])  # round-number levels in USD
+    level_days: list[int] = Field(default_factory=lambda: [5, 20])          # multi-day highs/lows (S/R)
+    pin_wick_ratio: float = Field(0.6, gt=0, lt=1)
+    pin_min_atr: float = Field(1.0, gt=0)
+    level_touch_atr: float = Field(0.25, ge=0)
+    news_times_ny: list[str] = Field(default_factory=lambda: ["08:30", "10:00", "14:00"])
+    news_spike_atr: float = Field(2.5, gt=0)
 
-    @field_validator("sl_atr", "tp_atr", "horizons", "sweep_lookbacks")
+    @field_validator("sl_atr", "tp_atr", "horizons", "sweep_lookbacks", "round_steps", "level_days")
     @classmethod
     def _non_empty(cls, v: list) -> list:
         if not v or any(x <= 0 for x in v):

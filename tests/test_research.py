@@ -199,3 +199,63 @@ def test_patterns_cli_without_data_explains_what_to_run(config_dir, tmp_path, mo
     monkeypatch.chdir(tmp_path)
     assert cli.run(["--config", str(config_dir), "patterns"]) == 1
     assert "quant_engine download" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------------ levels, price action, news
+def _m5(rows, start="2026-06-02 12:00"):
+    """M5 bars from (open, high, low, close) rows, preceded by 30 quiet candles for the ATR."""
+    quiet = [(4010.0, 4010.5, 4009.5, 4010.0)] * 30
+    rows = quiet + rows
+    t = pd.date_range(pd.Timestamp(start, tz="UTC") - pd.Timedelta(minutes=5 * 30), periods=len(rows), freq="5min")
+    df = pd.DataFrame(rows, columns=["open", "high", "low", "close"])
+    df.insert(0, "time", t)
+    df["tick_volume"], df["spread"], df["real_volume"] = 50.0, 30.0, 0.0
+    return df
+
+
+def _h4_for(m5):
+    from quant_engine.data.dukascopy import resample
+    m1 = m5.copy()
+    return resample(m1, Timeframe.H4)
+
+
+def _ev(m5, **rc):
+    cfg = StrategyConfig(research=rc)
+    return build_events(m5, _h4_for(m5), cfg.research, cfg.sessions, 0.01, 30, regime_kwargs(cfg))
+
+
+def test_round_number_rejection_break_and_pin():
+    m5 = _m5([(4010, 4011, 3998, 4009),     # wicks below 4000, closes back above: support + bullish pin
+              (4009, 4040, 4008, 4038),     # nothing at a level
+              (4038, 4052, 4037, 4049),     # wick above 4050, closes below: resistance
+              (4049, 4056, 4048, 4054)])    # close crosses 4050: break up
+    et = _ev(m5)
+    k = 30
+    assert et.events["round 50 support"][k] and et.events["round 100 support"][k]
+    assert et.events["bullish pin at round"][k]
+    assert et.events["round 50 resistance"][k + 2] and not et.events["round 100 resistance"][k + 2]
+    assert et.events["round 50 break up"][k + 3] and not et.events["round 100 break up"][k + 3]
+    assert not et.events["round 50 support"][k + 1]
+    assert et.natural["round 50 support"] == 1 and et.natural["bearish pin at round"] == -1
+
+
+def test_news_spike_only_at_release_time_and_fixed_spread():
+    # 2026-06-05 is the first Friday of June: 08:30 New York = 12:30 UTC (summer)
+    m5 = _m5([(4010, 4030, 4009, 4028), (4028, 4029, 4027, 4028)], start="2026-06-05 12:30")
+    et = _ev(m5, fixed_spread_points=20)
+    k = 30
+    assert et.events["news spike up"][k] and et.events["NFP spike up"][k]
+    assert not et.events["news spike up"][k + 1]
+    assert np.allclose(et.spread, 0.20)
+    m5b = _m5([(4010, 4030, 4009, 4028)], start="2026-06-05 12:35")     # same candle 5 minutes later
+    assert not _ev(m5b).events["news spike up"][30]
+
+
+def test_report_has_family_luck_table(planted_result):
+    from quant_engine.research.runner import family_summary
+    _, res = planted_result
+    fam = family_summary(res.tested)
+    assert {"time of day", "round numbers", "major support / resistance"} <= set(fam["family"])
+    assert fam["candidates"].sum() == len(res.tested)
+    assert np.allclose(fam["expected_by_luck"], (fam["candidates"] * 0.05).round(1))
+    assert fam.set_index("family").loc["time of day", "p_below_0.05"] >= 1     # the planted hour

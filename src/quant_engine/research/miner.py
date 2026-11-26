@@ -28,7 +28,7 @@ import pandas as pd
 
 from ..config import ResearchConfig
 from ..strategy.regime import BEARISH, BULLISH, NEUTRAL
-from .events import EventTable
+from .events import EventTable, event_family
 from .outcomes import trade_outcomes
 
 REGIMES = (BULLISH, BEARISH, NEUTRAL)
@@ -156,6 +156,7 @@ def mine(et: EventTable, rc: ResearchConfig) -> MiningResult:
     tested["survives"] = (tested["bh_pass"] & (tested["avg_r"] >= rc.min_avg_r)
                           & (tested["positive_thirds"] >= rc.min_stable_thirds))
     tested = tested.sort_values("t", ascending=False).reset_index(drop=True)
+    tested["family"] = tested["event"].map(event_family)
     tested["description"] = [Pattern(*r[:7]).describe(r[7]) for r in tested[
         ["event", "regime", "session", "direction", "sl_atr", "tp_atr", "horizon", "natural"]].itertuples(index=False)]
 
