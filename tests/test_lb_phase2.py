@@ -150,3 +150,29 @@ def test_cli_runs_everything_and_stops_if_not_reproduced(config_dir, tmp_path, m
     assert not s2["reproduced"] and "NOT REPRODUCED" in (rep2 / "report.md").read_text()
     assert not (rep2 / "candidates.csv").exists()
     assert cli.run(["--config", str(config_dir), "lb-phase2", "--start", "2026-06-01", "--out", str(tmp_path / "c")]) in (0, 1)
+
+
+def test_lb_symbols_one_shot_with_own_spread(config_dir, tmp_path, monkeypatch):
+    from quant_engine import cli
+    from quant_engine.data.storage import ParquetStore
+    from .synthetic import TFS, synthetic_bars
+    monkeypatch.chdir(tmp_path)
+    store = ParquetStore(tmp_path / "data")
+    b = synthetic_bars(days=150, seed=11)
+    for tf in TFS:
+        store.write_bars("XAUUSD", tf, b[tf])
+        fx = b[tf].copy()
+        for k in ("open", "high", "low", "close"):
+            fx[k] = fx[k] / 2000.0          # an FX-like price level
+        fx["spread"] = 12.0
+        store.write_bars("EURUSD", tf, fx)
+    rep = tmp_path / "sym"
+    assert cli.run(["--config", str(config_dir), "lb-symbols", "--symbols", "EURUSD,GBPUSD", "--start", "2026-06-01",
+                    "--out", str(rep)]) == 0
+    md = (rep / "report.md").read_text()
+    assert "p < 0.0250" in md and "XAUUSD (reference)" in md and "no stored M5/H4 data" in md
+    tr = pd.read_csv(rep / "trades_EURUSD.csv")
+    assert len(tr) > 0 and np.allclose(tr["bar_spread"], 12 * 0.00001)
+    gold = pd.read_csv(rep / "trades_XAUUSD.csv")
+    assert len(gold) == len(tr)                  # same shape, scaled prices: same trades
+    assert (rep / "detail" / "EURUSD.md").exists()

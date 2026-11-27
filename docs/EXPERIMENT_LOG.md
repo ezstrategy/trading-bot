@@ -142,3 +142,12 @@ trade SD about 1.1R): unusual but within what 12 years of trading can produce.
 Decision: **no modification improves the original; the original is preserved unchanged.** Original
 class: **promising, needs forward validation** (positive in every part with costs, but only 2015-2019
 was out of sample, PF 1.19-1.25 < 1.3 and drawdown up to 12.5% > 10%). Next: forward paper signals.
+
+## EXP-017 (2026-11-27): unchanged London breakout on other instruments, plan (written before the run)
+
+Owner asked (2026-11-26, again 2026-11-27) whether other metals / FX pairs do better. Code:
+`research/lb_symbols.py`, `python -m quant_engine lb-symbols`. Rules: the EXP-016 original, unchanged.
+Instruments fixed in advance: XAGUSD, EURUSD, GBPUSD, USDJPY; Bonferroni over 4 (p < 0.0125, block
+bootstrap and Newey-West both required). Costs: each instrument's own historical MT5 bar spread (floor 1
+point) + 2 points slippage per fill (GUESS), commission 0; stress x1.5 / x2. All MT5 history from 2015.
+Run once; nothing is tuned per instrument. Best possible class: "promising, needs forward validation".
