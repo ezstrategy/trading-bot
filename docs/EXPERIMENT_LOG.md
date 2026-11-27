@@ -258,3 +258,19 @@ code); negligible.
 - **Pre-check on the capped original's trade list (not the answer, the cap still tightens stops)**: at
   $500 since 2023, 300 of 695 signals (43%) would be skipped; none at $1,000 or more; none over full
   history from $500 (2015 prices made stops small and the account grows before stops widen).
+
+## EXP-020 result (2026-11-27, commit 3c12ffb, run once on MT5 XAUUSD 2015-01-02 to 2026-11-27)
+- **Per trade (costs included)**: natural stop since 2023: 695 trades, win 38.3%, PF 1.32, +0.121R
+  (95% CI +0.042 to +0.200, p 0.0015), longest losing run 12; all history: 2,154 trades, PF 1.26, +0.110R.
+  Capped original for comparison: since 2023 PF 1.24, +0.105R, losing run 27. Dropping the cap did not
+  hurt; on capped days the tightened stop was being hit by noise. Median stop since 2023 $14.40, p95 $65.90
+  (capped original p95 $28.50), so wide-stop days now need a bigger account.
+- **Skipped signals at 2% max risk (0.01 lot over the limit; no margin skips)**, natural stop:
+  since 2023: $500 348 of 695 (50.1%), $1,000 88 (12.7%), $2,500 8 (1.2%), $5,000 1 (0.1%).
+  All history: $500 7 of 2,154 (0.3%; the account grows before stops widen), $1,000+ none.
+  Skipped signals averaged +0.10R at $500 since 2023 (missed profit, not avoided losses).
+- **Sized ledger since 2023, natural stop**: $500 -> $1,024 (max DD 21.3%), $1,000 -> $3,288 (24.5%),
+  $2,500 -> $10,449 (28.8%), $5,000 -> $21,865 (30.0%). Worst single loss 2.4-2.6% of equity (costs
+  beyond the stop on slippage/spread, see report note). Back-test only; not a forecast.
+- **Class**: unchanged, "promising, needs forward validation". The natural stop becomes the reference
+  rule set going forward (owner rule); the capped original stays logged as EXP-016.
