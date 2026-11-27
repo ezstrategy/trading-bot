@@ -60,7 +60,7 @@ Data: MT5 XAUUSD M5, 2020-01-02 to 2024-02-22 (first 60% of 2020+). No costs, no
 - Last-hour vs next-hour correlation: -0.04 to +0.02 in every regime (no momentum, no reversion).
 - 2-hour range breakouts, +1 ATR before -1 ATR: 45.8-49.2% in every regime, with or against the trend.
 - Sweep table in the first run used uneven levels (reversal from the close, failure beyond the wick),
-  which biases it above 50%; **those numbers are void**. Fixed to symmetric levels; re-run pending.
+  which biases it above 50%; **those numbers are void**. Fixed to symmetric levels and re-run (commit c1e182a): **49.6-53.6% in every regime, a coin flip** (highest: sideways swept high 53.6%, 1,541 cases, 1 of 8 rows, before costs).
 
 Reading: at the 1-hour horizon on M5, the H4 regime does not change gold's short-term behaviour in
 this period. A trend-continuation engine has no support from simple drift or breakout follow-through.

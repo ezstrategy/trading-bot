@@ -118,3 +118,34 @@ def test_study_sweep_test_is_fair_on_a_random_walk(config_dir, tmp_path, monkeyp
     sw = pd.read_csv(rep / "5_sweeps.csv")
     rate = (sw["first_way_pct"] * sw["decided"]).sum() / sw["decided"].sum()
     assert 44 <= rate <= 56
+
+
+def test_london_oos_versions_are_fixed_in_advance():
+    from quant_engine.research.classics import LB_DEFAULT
+    from quant_engine.research.london_oos import VERSIONS
+    assert list(VERSIONS) == ["published", "trend version (EXP-012)"]
+    assert VERSIONS["published"] == LB_DEFAULT
+    tv = VERSIONS["trend version (EXP-012)"]
+    assert (tv["target_r"], tv["be_r"], tv["close_min"], tv["range_filter"], tv["trend"]) == (3.0, 1.0, 960, False, "with")
+
+
+def test_london_oos_cli_charges_historical_spread_and_slippage(config_dir, tmp_path, monkeypatch):
+    from quant_engine import cli
+    from quant_engine.data.storage import ParquetStore
+    from .synthetic import TFS, synthetic_bars
+    monkeypatch.chdir(tmp_path)
+    b = synthetic_bars(days=120, seed=5)          # bar spread 30 points, above the simulated 8
+    store = ParquetStore(tmp_path / "data")
+    for tf in TFS:
+        store.write_bars("XAUUSD", tf, b[tf])
+    rep = tmp_path / "oos"
+    assert cli.run(["--config", str(config_dir), "london-oos", "--start", "2026-06-01", "--end", "2026-10-01",
+                    "--out", str(rep)]) == 0
+    md = (rep / "report.md").read_text()
+    assert "EXP-015" in md and "p < 0.025" in md and "rule 7" in md
+    assert "## published" in md and "## trend version (EXP-012)" in md
+    tr = pd.read_csv(rep / "trades_published.csv")
+    assert len(tr) > 0
+    assert np.allclose(tr["extra_spread"], 0.30 - 0.08)
+    assert (tr["cost_r"] > 0).all() and (tr["r"] < tr["r_gross"]).all()
+    assert {"regime", "risk"} <= set(tr.columns)
