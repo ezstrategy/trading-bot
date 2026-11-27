@@ -259,6 +259,8 @@ def build_parser() -> argparse.ArgumentParser:
     mm.add_argument("--days", type=int)
     mm.add_argument("--note", default="")
     _lab_parsers(sub)
+    from .breakout.commands import add_parsers as _breakout_parsers
+    _breakout_parsers(sub)
     db = sub.add_parser("dashboard", help="open the local web app (glass dashboard)")
     db.add_argument("--port", type=int, default=8501)
     db.add_argument("--classic", action="store_true", help="open the old Streamlit dashboard instead")
@@ -626,6 +628,12 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
 
     if args.cmd.startswith("lab-"):
         return _lab_cmd(cfg, args)
+    if args.cmd == "breakout-backtest":
+        from .breakout.commands import backtest_cmd
+        return backtest_cmd(cfg, args.config, args)
+    if args.cmd == "breakout-status":
+        from .breakout.commands import status_cmd
+        return status_cmd(cfg, args.config)
     if args.cmd.startswith("data-") or args.cmd == "instrument":
         return _data_cmd(cfg, store, canonical, args)
     if args.cmd == "validate":
@@ -870,6 +878,9 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
                 print(f"{r.dataset}: {r.rows_stored} ticks, quality={'OK' if r.quality.ok else 'ISSUES'} {r.quality.counts()}")
             elif args.cmd == "run":
                 return _run_engine(cfg, s, args, now, fetch_text)
+            elif args.cmd == "breakout-run":
+                from .breakout.commands import run_cmd
+                return run_cmd(cfg, args.config, s, args, now)
             elif args.cmd == "mt5-instrument":
                 from .instruments import InstrumentSpec, load_instruments, write_profile
                 book = load_instruments(args.config)

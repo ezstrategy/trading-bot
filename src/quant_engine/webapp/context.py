@@ -34,6 +34,7 @@ class AppContext:
     cfg: AppConfig
     store: ParquetStore
     point: float = 0.01
+    config_dir: str | None = None
     mt5_info: dict | None = None
     mt5_lock: threading.Lock = field(default_factory=threading.Lock)   # MT5 is not thread safe
     _cache_lock: threading.Lock = field(default_factory=threading.Lock)

@@ -130,6 +130,12 @@ class InstrumentSpec(BaseModel):
                 got[ours] = v if ours == "profit_currency" else (int(v) if ours == "digits" else float(v))
         if account_currency:
             got["account_currency"] = account_currency
+        # swap per lot per night, only when the broker quotes it in points (SYMBOL_SWAP_MODE_POINTS = 1)
+        if getattr(info, "swap_mode", None) == 1:
+            for ours, theirs in (("swap_long_points", "swap_long"), ("swap_short_points", "swap_short")):
+                v = getattr(info, theirs, None)
+                if v is not None:
+                    got[ours] = float(v)
         confirmed = sorted(set(b.get("confirmed", [])) | set(got))
         return cls(**{**b, **got, "name": name or b.get("name", ""), "broker": broker or b.get("broker", "unknown"),
                       "symbol": b.get("symbol", getattr(info, "name", "")),

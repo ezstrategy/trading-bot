@@ -1,0 +1,95 @@
+# Long-only XAUUSD daily breakout module (owner spec 2026-11-27).
+# SIGNALS ONLY: nothing here can place, modify or close an order.
+# Changing any rule below means a new strategy `version` (rulebook rule 18).
+
+# off   = nothing runs
+# paper = signals are generated from live MT5 data, stored and tracked on the dashboard,
+#         NOT sent to Telegram (default until the owner has reviewed the backtest reproduction)
+# live  = also sent to Telegram; refused unless `live_review_approved_by` is filled in
+mode: paper
+live_review_approved_by: ""        # owner's name + date once the review gate is passed
+
+daily:
+  # Trading day used to build D1 candles from M5. new_york_17 = the FX/metals day that ends at
+  # 17:00 New York (DST-correct); most MT5 brokers' server D1 candles use this same boundary.
+  # utc_midnight is available for comparison. GUESS: owner's broker uses the NY-close day.
+  day_boundary: new_york_17
+  min_m5_bars_per_day: 100         # a D1 built from fewer M5 bars is "incomplete": no signal from it
+  min_days_in_month: 15            # previous month needs at least this many valid D1 candles
+
+strategies:
+  prev_month_high:                 # Strategy A, primary candidate
+    enabled: true
+    version: "1.0.0"
+    atr_period: 14                 # D1 ATR (Wilder), including the breakout candle
+    stop_atr_mult: 1.5             # stop = entry - 1.5 x ATR
+    target_r: 2.0                  # target = entry + 2 x initial risk
+    max_sessions: 5                # entry session counts as session 1; exit at the close of session 5
+    # When may a NEW breakout fire after one was used?
+    #   new_month                  = one breakout per calendar month (the level only changes monthly)
+    #   close_below_level          = after any D1 close at or below the level
+    #   new_month_or_close_below   = either of the two
+    reset_mode: new_month
+  channel_20d:                     # Strategy B, secondary candidate
+    enabled: true
+    version: "1.0.0"
+    channel_days: 20               # highest high of the previous 20 completed D1, breakout candle excluded
+    atr_period: 14
+    stop_atr_mult: 1.5
+    target_r: 2.0
+    max_sessions: 5
+    reset_mode: close_below_level  # the channel moves daily, so it re-arms after a close back inside
+
+validation:
+  max_spread: 1.00                 # price units (USD). GUESS: wide enough for the 18:00 NY reopen
+  max_data_age_minutes: 30         # live: newest closed M5 candle must be this recent (market open)
+  max_signal_age_hours: 20         # live: never issue a signal for a D1 close older than this
+
+risk:
+  account_equity_fallback: 500     # used when MT5 does not report equity (owner's planned account)
+  per_trade_pct: 0.5               # default risk per trade
+  allowed_risk_pct: [0.25, 0.5, 1.0]
+  max_combined_open_pct: 1.0       # all open + pending breakout positions together
+  one_position_per_strategy: true
+  # Signals of different strategies whose breakout candles are within this many sessions of each
+  # other are ONE correlated exposure: they share a single per_trade_pct budget (never doubled).
+  correlation_window_sessions: 3
+  correlated_policy: primary_only  # primary_only = the first/primary strategy gets the risk, the other
+                                   # is recorded as Cancelled (correlated); split = share the budget
+  primary_order: [prev_month_high, channel_20d]
+  skip_if_min_lot_over: true       # 0.01 lot would exceed the risk -> skip (never move the stop)
+
+costs:
+  instrument_profile: ""           # instruments.yaml profile; empty = default (use mt5-instrument on the PC)
+  spread_floor: 0.08               # owner's broker spread; used when the data spread is lower/missing
+  slippage_points: 2               # per fill, in tick_size units. GUESS
+  commission_per_lot: 0.0          # owner 2026-11-27
+  # Swap per lot per night in points, MT5 SYMBOL_SWAP_MODE_POINTS convention (negative = cost).
+  # null = take it from the instrument profile (read from MT5); if that is null too, the report says
+  # "swap NOT included" in its headline and adds the stress row below.
+  swap_long_points: null
+  swap_triple_weekday: 2           # 0=Mon .. 2=Wed: triple swap rollover (MT5 swap_rollover3days)
+  swap_stress_points: -50          # GUESS, only for the clearly-labelled stress row
+
+backtest:
+  main_window_start: "2023-01-01"  # owner 2026-11-27: main window; full history shown as secondary
+  periods:                         # chronological blocks reported side by side (no fitting on any)
+    - {name: "2015-2018", start: "2015-01-01", end: "2019-01-01"}
+    - {name: "2019-2022", start: "2019-01-01", end: "2023-01-01"}
+    - {name: "2023+ (main)", start: "2023-01-01", end: null}
+  train_test_split: "2023-01-01"   # train = before, test = from (fixed rules: nothing is fitted)
+  walk_forward:
+    train_years: 3
+    test_years: 1
+    # Candidate parameter sets the walk-forward may choose between on each TRAIN window only.
+    # Default = only the spec values, so nothing is optimised; the owner must add candidates on purpose.
+    candidates: []
+  equity_accounts: [500, 10000]    # sized simulations (risk engine applied, skipped signals reported)
+  neighbourhood:                   # robustness table only; never used to pick rules
+    stop_atr_mult: [1.25, 1.75]
+    target_r: [1.5, 2.5]
+    max_sessions: [4, 6]
+
+store:
+  path: data/breakout/signals.sqlite   # permanent signal record (never deleted)
+reports_dir: reports/breakout
