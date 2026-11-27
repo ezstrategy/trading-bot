@@ -338,7 +338,8 @@ def render_research() -> None:
             st.markdown(log_md.read_text(encoding="utf-8"))
 
 
-tab_market, tab_signals, tab_bt, tab_news, tab_res = st.tabs(["Market", "Signals", "Backtest", "News", "Research"])
+tab_market, tab_signals, tab_bt, tab_news, tab_res, tab_lab = st.tabs(
+    ["Market", "Signals", "Backtest", "News", "Research", "Quant Lab"])
 with tab_market:
     if live:
         st.fragment(render, run_every=interval)()
@@ -352,3 +353,9 @@ with tab_news:
     render_news()
 with tab_res:
     render_research()
+with tab_lab:
+    from quant_engine.dashboard.lab_page import render_lab
+    try:
+        render_lab(cfg, TIME_ZONES[tz_label])
+    except Exception as exc:  # shown, never crashes the rest of the page
+        st.error(f"Quant Lab problem: {exc}")
