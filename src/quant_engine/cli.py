@@ -16,6 +16,7 @@
     python -m quant_engine classics [--start 2020-01-01]   (well-known public strategies, backtested)
     python -m quant_engine london [--start 2020-01-01]     (polish the London breakout, checked on unseen data)
     python -m quant_engine gtc [--start 2020-01-01]        (owner's GTC-SBR strategy: experiments A-F, audit report)
+    python -m quant_engine lb-scaleout                     (EXP-018: 3-part T1/T2/T3 exit on the gold breakout, one run)
     python -m quant_engine lb-symbols                      (EXP-017: same London breakout on silver / FX, one run)
     python -m quant_engine lb-phase2                       (EXP-016: London breakout Phase 2 research, one run)
     python -m quant_engine london-oos                      (EXP-015: one-shot London breakout test on 2015-2019)
@@ -167,6 +168,12 @@ def build_parser() -> argparse.ArgumentParser:
     lu.add_argument("--end", default="2020-01-01")
     lu.add_argument("--point", type=float, default=0.01)
     lu.add_argument("--out")
+    so = sub.add_parser("lb-scaleout", help="EXP-018: 3-part scale-out exit (T1/T2/T3) on the gold London breakout")
+    so.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    so.add_argument("--start", default="2015-01-01")
+    so.add_argument("--end")
+    so.add_argument("--point", type=float, default=0.01)
+    so.add_argument("--out")
     ls_ = sub.add_parser("lb-symbols", help="EXP-017: unchanged London breakout on XAGUSD, EURUSD, GBPUSD, USDJPY")
     ls_.add_argument("--symbols", default="XAGUSD,EURUSD,GBPUSD,USDJPY")
     ls_.add_argument("--start", default="2015-01-01")
@@ -397,6 +404,20 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
             summary = run_study(cfg, store, ds, out, pd.Timestamp(args.start, tz="UTC") if args.start else None,
                                 pd.Timestamp(args.end, tz="UTC") if args.end else None, args.part,
                                 f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)")
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2, default=str))
+        print(f"Report: {out}/report.md")
+        return 0
+    if args.cmd == "lb-scaleout":
+        from .research.lb_scaleout import run_lb_scaleout
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/lb_scaleout_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        try:
+            summary = run_lb_scaleout(cfg, store, ds, args.point, out, pd.Timestamp(args.start, tz="UTC"),
+                                      pd.Timestamp(args.end, tz="UTC") if args.end else None,
+                                      f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)")
         except ValueError as exc:
             print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
             return 1

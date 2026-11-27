@@ -176,3 +176,38 @@ def test_lb_symbols_one_shot_with_own_spread(config_dir, tmp_path, monkeypatch):
     gold = pd.read_csv(rep / "trades_XAUUSD.csv")
     assert len(gold) == len(tr)                  # same shape, scaled prices: same trades
     assert (rep / "detail" / "EURUSD.md").exists()
+
+
+def test_scale_out_equal_targets_reproduce_the_original(config_dir, tmp_path):
+    from quant_engine.config import load_config
+    from quant_engine.features.sessions import ny_minutes
+    from quant_engine.research.classics import lb_day_groups
+    from quant_engine.research.lb_scaleout import scale_out
+    from quant_engine.timeframes import Timeframe
+    cfg = load_config(config_dir)
+    _, b = _store(tmp_path)
+    m5 = b[Timeframe.M5]
+    g = lb_day_groups(m5, cfg.strategy.sessions)
+    mins = ny_minutes(pd.DatetimeIndex(m5["time"]))
+    close_end = np.array([x[(mins[x] >= 60) & (mins[x] < 960)][-1] if ((mins[x] >= 60) & (mins[x] < 960)).any()
+                          else x[-1] for x in g])
+    orig = P.lb_trades(m5, 0.08, P.ORIGINAL, None, g)
+    same = scale_out(m5, orig, 0.08, (3.0, 3.0, 3.0), True, close_end, be_at=1.0, be_first=True)
+    assert np.allclose(same["r"], orig["r"]) and np.allclose(same["part1_r"], orig["r"])
+    s1 = scale_out(m5, orig, 0.08, (1.0, 2.0, 3.0), True, close_end)
+    hit = s1["t1_hit"].to_numpy()
+    assert np.allclose(s1.loc[hit, "part1_r"], 1.0)
+    assert (s1.loc[hit, ["part2_r", "part3_r"]].min(axis=1) >= -1e-9).all()     # break-even after T1
+    assert (s1["r"] <= 3.0 + 1e-9).all()
+
+
+def test_lb_scaleout_cli(config_dir, tmp_path, monkeypatch):
+    from quant_engine import cli
+    _store(tmp_path, days=160, seed=5)
+    monkeypatch.chdir(tmp_path)
+    rep = tmp_path / "so"
+    assert cli.run(["--config", str(config_dir), "lb-scaleout", "--start", "2026-06-01", "--out", str(rep)]) == 0
+    md = (rep / "report.md").read_text()
+    for k in ("since 2023 (main)", "last 2 years", "S1 1/2/3R, BE after T1 (main)", "T1_reached%",
+              "3 x 0.01 = 0.03 lots", "Verdict per version"):
+        assert k in md, k

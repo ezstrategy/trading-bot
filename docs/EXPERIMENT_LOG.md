@@ -191,3 +191,14 @@ Same code (be8812d), run once with `--calendar`; all 30 non-H5 rows identical to
 
 US news days were weak in 2015-2019 (-0.161R) but normal from 2020 (+0.10R). A news filter is not
 supported. 2019 is not explained by news (days without US news also lost that year).
+
+## EXP-018 (2026-11-27): scale-out exit, plan (written before the run)
+
+Owner idea: split into 3 x 0.01 lots with targets T1 / T2 / T3, so a move to T1 that reverses still
+pays. Code `research/lb_scaleout.py`, `python -m quant_engine lb-scaleout`. Entries are exactly the
+original's trades; only the exit changes. Three equal parts; after T1 the other parts' stop goes to
+entry. Versions: **S1 1/2/3R (main)**, nearby S2 0.75/1.5/3R, S3 1/2/4R, and S4 1/2/3R without break-
+even. Same costs as EXP-016. Compared trade by trade with the original (paired block bootstrap).
+"Better" needs: 2015-2019 diff > 0 with p < 0.05, 2020-2022 diff > 0 with p < 0.0125, and 2023+ diff > 0.
+Reported with 2023+ as the main window, plus last 2 years and full history; win rate both as trade net
+> 0 and as T1 reached; minimum account for 3 x 0.01 lots at 0.5% risk.
