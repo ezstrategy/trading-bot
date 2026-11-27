@@ -156,6 +156,23 @@ python -m quant_engine patterns --source mt5      # report in reports/patterns_m
 
 ## Phases 4-6: live signals, Telegram, news filter
 
+**Live mode since 2026-11-27: `strategy.mode: london`** (owner's choice; the only strategy that held
+up in research, still RESEARCH REQUIRED, so treat its signals as paper signals). `strategy/london.py`:
+
+* At 01:00 New York (10:30 / 11:30 IST) the Asian range (20:00-01:00 NY) is final and one **setup**
+  message is sent: buy stop above the range and/or sell stop below it (H4 trend side only; neutral H4
+  = both, one cancels the other), stop at the other side of the range (natural stop, never tightened),
+  target 3R, breakeven at +1R, close at 16:00 NY. Lots for at most 2% risk with costs; a side whose
+  0.01 lot would risk more is skipped and reported.
+* Follow-ups as replies: triggered, breakeven, target, stop, 16:00 close, or cancelled (wrong side
+  broke first / no breakout). A setup is never sent late: if the engine starts after the breakout,
+  the day is logged as missed.
+* The live code is also the backtest (`backtest --mode london`), and `tests/test_london.py` checks
+  it gives exactly the research trades (EXP-016 / EXP-020) and never changes a past event.
+* The rules live in `config/strategy.yaml` (`london:`); they are the tested values. Changing one
+  makes it an untested strategy and every setup message says so. `mode: regime` brings back the
+  three-mode engine below.
+
 ```powershell
 python -m quant_engine telegram-test     # checks TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID from .env
 python -m quant_engine run               # or double-click start_signals.bat

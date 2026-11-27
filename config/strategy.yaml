@@ -44,10 +44,25 @@ volatility:
   min_stop_spreads: 5.0
 
 # Which strategy sends signals:
+#   london   = London breakout of the Asian range with the H4 trend filter (owner 2026-11-27; the only
+#              strategy that held up in research: EXP-015/016/020, RESEARCH REQUIRED -> paper signals)
 #   regime   = pick by market: bullish -> buy the dip, bearish -> sell the rally, neutral -> fade the range
 #   v1       = the original sweep + reversal model (Strategy Spec v1) in every market
 #   bullish / bearish / sideways = one mode only, in every market (for comparison)
-mode: regime
+mode: london
+
+# London breakout (mode: london). These are the TESTED rules (EXP-016 original + EXP-020 natural stop).
+# Changing any value makes it an untested strategy; signals and reports then say so.
+london:
+  range_start_ny: "20:00"    # Asian range, New York time (evening before)
+  range_end_ny: "01:00"      # setup is sent when this candle closes
+  close_ny: "16:00"          # close anything still open (New York time)
+  buffer_pct: 0.02           # stop orders this % of price beyond the range
+  target_r: 3.0
+  breakeven_r: 1.0           # stop to entry after +1R
+  trend_filter: true         # only the H4 trend side; neutral H4 = both sides, first breakout wins
+  stop_cap_pct: null         # null = natural stop (other side of the range), never tightened
+  min_range_candles: 50
 
 modes:
   ema_fast: 20               # M15 EMAs used by the bullish mode

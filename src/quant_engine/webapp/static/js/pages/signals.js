@@ -8,7 +8,7 @@ export default {
     el.innerHTML = skeleton(2);
     const d = await get("/api/signals");
     const st = d.stats;
-    const side = (v) => `<span class="badge ${v === 1 || v === "BUY" || v === "buy" ? "good" : "bad"}">${v === 1 ? "BUY" : v === -1 ? "SELL" : esc(v)}</span>`;
+    const side = (v) => `<span class="badge ${v === "BUY/SELL" ? "gold" : v === 1 || v === "BUY" || v === "buy" ? "good" : "bad"}">${v === 1 ? "BUY" : v === -1 ? "SELL" : esc(v)}</span>`;
     el.innerHTML = `
       <div class="grid kpis">
         ${kpi("Signals sent", st.sent, "gold")}${kpi("Closed", st.closed, "neutral")}

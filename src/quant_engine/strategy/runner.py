@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from ..config import AppConfig
@@ -40,6 +41,8 @@ def run_backtest(cfg: AppConfig, store: ParquetStore, dataset: str, point: float
     cal = NewsCalendar(load_calendar(cfg.strategy.news.calendar_file), cfg.strategy.news)
     use_news = cfg.strategy.news.enabled and cal.covers(first, last)
     news = cal if use_news else None
+    if mode == "london":
+        return _london(cfg, bars, dataset, point, out_dir, source_note or dataset, quality)
     if mode == "compare":
         return _compare(cfg, features, news, out_dir, source_note or dataset, first, last)
     bt = Backtester(features, cfg.strategy, news, model=build_model(mode, features, cfg.strategy, news))
@@ -66,6 +69,56 @@ def run_backtest(cfg: AppConfig, store: ParquetStore, dataset: str, point: float
     (out / "report.md").write_text(report.to_markdown(f"Backtest: {dataset}", meta, trades,
                                                       bt.model.rejections, risk))
     log.info("backtest_done", extra={"dataset": dataset, "signals": len(trades), "out": str(out)})
+    return summary
+
+
+def _london(cfg: AppConfig, bars, dataset: str, point: float, out_dir, note: str, quality) -> dict:
+    """London breakout backtest, replayed with the live signal code (strategy/london.py).
+
+    Costs as in the research runs (EXP-016/020): the simulation pays the spread floor on every
+    fill; the historical bar spread above it, slippage on both fills and commission are charged
+    per trade."""
+    from ..research.metrics import apply_costs
+    from .london import london_trades
+    sc = cfg.strategy
+    costs, risk = sc.research.costs, sc.backtest.risk_pct
+    base_sp = costs.min_spread_points * point
+    m5 = bars[Timeframe.M5]
+    tr = london_trades(m5, bars[Timeframe.H4], sc, base_sp)
+    if len(tr):
+        t = pd.DatetimeIndex(m5["time"])
+        bar_sp = m5["spread"].to_numpy(float) * point if "spread" in m5 else np.full(len(m5), base_sp)
+        extra = np.maximum(bar_sp[t.get_indexer(pd.DatetimeIndex(tr["entry_time"]))] - base_sp, 0.0)
+        tr["r"] = tr["r"] - extra / tr["risk"]
+        tr = apply_costs(tr, costs, point)
+        tr["filled"] = True
+        tr = tr.rename(columns={"trend": "trend_regime"})
+    meta = {"data": note, "strategy mode": "london (EXP-016 rules, natural stop)"
+            + ("" if sc.london.is_tested_version() else " - SETTINGS CHANGED, untested"),
+            "period (UTC)": f"{m5['time'].iat[0]:%Y-%m-%d %H:%M} to {m5['time'].iat[-1] + Timeframe.M5.delta:%Y-%m-%d %H:%M}",
+            "M5 candles": len(m5), "M5 data quality issues": quality.counts() or "none",
+            "risk per trade": f"{risk}% (1R)",
+            "costs": f"spread at least {costs.min_spread_points:g} points (historical bar spread above it charged), "
+                     f"slippage {costs.slippage_points:g} points per fill, commission {costs.commission_per_lot:g}/lot",
+            "news filter": "not used (not part of the tested rules)"}
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    tr.to_csv(out / "trades.csv", index=False)
+    summary = {"meta": {k: str(v) for k, v in meta.items()}, "overall": report.stats(tr, risk),
+               "by_trend_regime": report.breakdown(tr, "trend_regime", risk).to_dict("records") if len(tr) else [],
+               "rejections": {}}
+    (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
+    lines = [f"# Backtest: {dataset}, London breakout\n", *[f"- **{k}**: {v}" for k, v in meta.items()], ""]
+    o = summary["overall"]
+    lines += ["| " + " | ".join(o) + " |", "|" + "---|" * len(o), "| " + " | ".join(str(v) for v in o.values()) + " |", ""]
+    if len(tr):
+        from ..research.runner import _table
+        by = pd.DataFrame(summary["by_trend_regime"])
+        ex = tr["exit_reason"].value_counts().rename_axis("exit").reset_index(name="trades")
+        lines += ["## By H4 trend\n", _table(by, list(by.columns)), "", "## Exit reasons\n", _table(ex, ["exit", "trades"])]
+    lines.append("\n_Research stage (RESEARCH REQUIRED): use for paper signals only. Signals only, no orders._")
+    (out / "report.md").write_text("\n".join(lines), encoding="utf-8")
+    log.info("backtest_done", extra={"dataset": dataset, "mode": "london", "signals": len(tr), "out": str(out)})
     return summary
 
 

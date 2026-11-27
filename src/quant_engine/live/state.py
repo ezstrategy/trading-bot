@@ -35,6 +35,7 @@ class SentSignal:
     outcome: str = "pending"
     r: float | None = None
     alerts: list[str] = field(default_factory=list)   # news event times already alerted
+    extra: dict = field(default_factory=dict)          # mode-specific data (london: lots per side)
 
     @property
     def key(self) -> str:

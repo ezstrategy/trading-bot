@@ -13,7 +13,7 @@ from ..context import AppContext, md_html, records
 from .deps import ctx
 
 router = APIRouter(prefix="/api/backtests", tags=["backtest"])
-MODES = {"regime": "3-mode switch (by market)", "compare": "Compare all modes x markets",
+MODES = {"london": "London breakout + H4 trend (live mode)", "regime": "3-mode switch (by market)", "compare": "Compare all modes x markets",
          "bullish": "Bullish: buy the dip", "bearish": "Bearish: sell the rally",
          "sideways": "Sideways: fade the range", "v1": "v1: sweep reversal"}
 SOURCES = {"dukascopy": "Dukascopy (free history)", "mt5": "MT5 (downloaded)"}
@@ -21,7 +21,7 @@ SOURCES = {"dukascopy": "Dukascopy (free history)", "mt5": "MT5 (downloaded)"}
 
 class RunRequest(BaseModel):
     source: str = "mt5"
-    mode: str = "regime"
+    mode: str = "london"
 
 
 def _report(name: str) -> Path:

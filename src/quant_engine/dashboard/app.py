@@ -218,8 +218,8 @@ def render_backtest() -> None:
     source = c1.radio("Data", ["dukascopy", "mt5"], horizontal=True,
                       format_func=lambda s: "Dukascopy (free history)" if s == "dukascopy" else "MT5 (downloaded)",
                       help="Get Dukascopy data with: python -m quant_engine dukascopy --days 180")
-    modes = ["regime", "compare", "bullish", "bearish", "sideways", "v1"]
-    mode_names = {"regime": "3-mode switch (by market)", "compare": "Compare all modes x markets",
+    modes = ["london", "regime", "compare", "bullish", "bearish", "sideways", "v1"]
+    mode_names = {"london": "London breakout + H4 trend (live mode)", "regime": "3-mode switch (by market)", "compare": "Compare all modes x markets",
                   "bullish": "Bullish: buy the dip", "bearish": "Bearish: sell the rally",
                   "sideways": "Sideways: fade the range", "v1": "v1: sweep reversal"}
     mode = c2.selectbox("Strategy", modes, format_func=mode_names.get)
