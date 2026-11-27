@@ -12,7 +12,8 @@ Questions answered per four-state H4 regime (bullish / bearish / sideways / unce
 4. Breakouts: after an M5 close beyond the previous 2-hour high / low, how often price runs
    another 1 ATR before coming back 1 ATR (follow-through), with and against the regime.
 5. Sweeps: after a new 2-hour low / high is taken but the candle closes back inside, how often
-   price then moves 1 ATR away from the sweep before 1 ATR through it (reversal).
+   price then moves 1 ATR in the reversal direction before 1 ATR the other way, both measured
+   from the sweep candle's close (symmetric, so 50% = no edge).
 """
 from __future__ import annotations
 
@@ -140,10 +141,8 @@ def run_study(cfg: AppConfig, store: ParquetStore, dataset: str, out_dir: str | 
             t4.append({"regime": s, "breakout": name, "vs regime": with_, **_rate(r)})
         for name, mask, d in (("swept low, closed back above", sw_lo, 1), ("swept high, closed back below", sw_hi, -1)):
             idx = once(mask & (reg == s))
-            ext = l[idx] if d == 1 else h[idx]
-            up = np.where(d == 1, c[idx] + a[idx], ext + a[idx])
-            dn = np.where(d == 1, ext - a[idx], c[idx] - a[idx])
-            r = first_touch(h, l, c, idx, up, dn) * d
+            # symmetric: both levels 1 ATR from the sweep candle's close (a fair 50/50 baseline)
+            r = first_touch(h, l, c, idx, c[idx] + a[idx], c[idx] - a[idx]) * d
             t5.append({"regime": s, "sweep": name, **_rate(r)})
 
     out = Path(out_dir)
@@ -166,7 +165,8 @@ def run_study(cfg: AppConfig, store: ParquetStore, dataset: str, out_dir: str | 
           _table(tabs["3_momentum"], list(tabs["3_momentum"].columns)),
           "\n## 4. Breakouts of the previous 2-hour range: +1 ATR more before -1 ATR back?\n",
           "50% = a coin flip (before costs).\n", _table(tabs["4_breakouts"], list(tabs["4_breakouts"].columns)),
-          "\n## 5. Sweeps that close back inside: 1 ATR reversal before 1 ATR through the sweep?\n",
+          "\n## 5. Sweeps that close back inside: +1 ATR reversal before -1 ATR, both from the close?\n",
+          "50% = a coin flip (before costs).\n",
           _table(tabs["5_sweeps"], list(tabs["5_sweeps"].columns)),
           "\n_Descriptive research on past data. Signals only._\n"]
     (out / "report.md").write_text("\n".join(md), encoding="utf-8")

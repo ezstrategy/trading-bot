@@ -48,3 +48,20 @@ Holding gold over the same parts: +32.7% older, +77.0% unseen.
 **not** been run on real data. GTC-SBR v1.0.0 is tested in the Quant Lab (PR #9, programme
 `gtc_sbr_2020`), which locks the last 20% of 2020+ as its test period. To keep that period
 untouched, `python -m quant_engine gtc` must not be run on real data before the Quant Lab's test.
+
+## EXP-014 (2026-11-27): regime behaviour study (rule 2), descriptive, development data only
+
+Hypothesis: gold behaves differently in bullish / bearish / sideways / uncertain H4 regimes (drift,
+momentum, breakout follow-through, sweep reversals), which would justify separate engines.
+Data: MT5 XAUUSD M5, 2020-01-02 to 2024-02-22 (first 60% of 2020+). No costs, no strategy.
+
+- Time in regime: bullish 29%, bearish 23%, sideways 18%, uncertain 29% (H4).
+- Next-hour drift by regime x session: no cell significant (largest |t| = 1.63).
+- Last-hour vs next-hour correlation: -0.04 to +0.02 in every regime (no momentum, no reversion).
+- 2-hour range breakouts, +1 ATR before -1 ATR: 45.8-49.2% in every regime, with or against the trend.
+- Sweep table in the first run used uneven levels (reversal from the close, failure beyond the wick),
+  which biases it above 50%; **those numbers are void**. Fixed to symmetric levels; re-run pending.
+
+Reading: at the 1-hour horizon on M5, the H4 regime does not change gold's short-term behaviour in
+this period. A trend-continuation engine has no support from simple drift or breakout follow-through.
+Decision: no strategy; informs the engine hypotheses (rule 2).

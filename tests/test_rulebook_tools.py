@@ -101,3 +101,20 @@ def test_study_cli_uses_development_part_only(config_dir, tmp_path, monkeypatch)
     assert "studied part**: development" in md and f"{last:%Y-%m-%d}" not in md.split("studied part")[1].split("\n")[0]
     for k in ("1. Time in each regime", "2. Drift", "3. Momentum", "4. Breakouts", "5. Sweeps"):
         assert k in md
+
+
+def test_study_sweep_test_is_fair_on_a_random_walk(config_dir, tmp_path, monkeypatch):
+    """No edge in the data -> sweep 'reversal' rate near 50% (the old wick-based levels gave ~60%+)."""
+    from quant_engine import cli
+    from quant_engine.data.storage import ParquetStore
+    from .synthetic import TFS, synthetic_bars
+    monkeypatch.chdir(tmp_path)
+    b = synthetic_bars(days=200, seed=9, drift=0.0)
+    store = ParquetStore(tmp_path / "data")
+    for tf in TFS:
+        store.write_bars("XAUUSD", tf, b[tf])
+    rep = tmp_path / "rw"
+    assert cli.run(["--config", str(config_dir), "study", "--part", "all", "--out", str(rep)]) == 0
+    sw = pd.read_csv(rep / "5_sweeps.csv")
+    rate = (sw["first_way_pct"] * sw["decided"]).sum() / sw["decided"].sum()
+    assert 44 <= rate <= 56
