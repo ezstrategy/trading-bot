@@ -17,9 +17,14 @@ TFS = (Timeframe.M5, Timeframe.M15, Timeframe.H1, Timeframe.H4)
 
 
 def synthetic_m1(start: str = "2026-06-01", days: int = 60, seed: int = 7,
-                 price: float = 2400.0, block_days: int = 10) -> pd.DataFrame:
+                 price: float = 2400.0, block_days: int = 10, drift: float = 0.012,
+                 plant_hour: int | None = None, plant_move: float = 0.0, plant_minutes: int = 30) -> pd.DataFrame:
     """Seeded M1 bars (UTC) with drift that switches every ``block_days`` days:
-    up, down, flat, repeated. Weekend (Fri 21:00 - Sun 22:00 UTC) is closed."""
+    up, down, flat, repeated. Weekend (Fri 21:00 - Sun 22:00 UTC) is closed.
+
+    ``drift=0`` gives a pure random walk (no pattern at all). ``plant_hour`` adds a known
+    pattern: price rises by ``plant_move`` over the first ``plant_minutes`` of that UTC hour
+    every day (used to check that the pattern miner finds a real edge)."""
     rng = np.random.default_rng(seed)
     t = pd.date_range(pd.Timestamp(start, tz="UTC"), periods=days * 1440, freq="1min")
     dow, hour = t.dayofweek, t.hour
@@ -27,12 +32,15 @@ def synthetic_m1(start: str = "2026-06-01", days: int = 60, seed: int = 7,
     t = t[open_]
     n = len(t)
     block = ((t - t[0]).days // block_days) % 3
-    drift = np.select([block == 0, block == 1], [0.012, -0.012], 0.0)
+    drift = np.select([block == 0, block == 1], [drift, -drift], 0.0)
     hrs = t.hour.to_numpy()
     vol = np.where(((hrs >= 7) & (hrs < 10)) | ((hrs >= 12) & (hrs < 16)), 0.55, 0.25)
     # occasional bursts make displacement candles and sweeps
     burst = rng.random(n) < 0.004
     steps = drift + vol * rng.standard_normal(n) + burst * rng.choice([-1, 1], n) * 2.5
+    if plant_hour is not None:
+        steps = steps + np.where((hrs == plant_hour) & (t.minute.to_numpy() < plant_minutes),
+                                 plant_move / plant_minutes, 0.0)
     close = price + np.cumsum(steps)
     open_px = np.concatenate([[price], close[:-1]])
     wick = np.abs(rng.normal(0, 0.15, n))

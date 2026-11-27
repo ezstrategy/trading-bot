@@ -116,3 +116,70 @@ backtest:
   regime_ema_period: 50
   regime_slope_bars: 10
   regime_min_slope_atr: 0.5   # GUESS
+
+# Pattern mining: python -m quant_engine patterns (or find_patterns.bat).
+# Looks for repeatable moves per H4 market (bullish / bearish / neutral) on the OLDER part of the
+# history, then checks each one on the NEWER part it never saw. Distances are M5 ATR(14).
+research:
+  discover_frac: 0.6         # older 60% = discovery, newer 40% = held-out check
+  sl_atr: [1.0]              # stop distance tested
+  tp_atr: [1.0, 2.0]         # target distances tested
+  horizons: [12, 36]         # give up after 1 h / 3 h (M5 candles)
+  sweep_lookbacks: [24, 72]  # liquidity sweep of the last 2 h / 6 h high or low
+  impulse_body_atr: 1.5      # impulse candle: body >= 1.5 ATR ...
+  impulse_body_ratio: 0.6    # ... and >= 60% of the candle
+  move_bars: 12              # big move: >= 3 ATR in 1 hour
+  move_atr: 3.0
+  range_bars: 48             # range edge: last 4 h range, 3-10 ATR wide, touch within 10% of an edge
+  range_min_atr: 3.0
+  range_max_atr: 10.0
+  range_edge: 0.1
+  min_trades_discover: 30    # fewer trades than this = not tested
+  min_trades_validate: 15
+  fdr_q: 0.10                # false discovery rate for the many patterns tested (Benjamini-Hochberg)
+  min_avg_r: 0.05            # must beat costs by at least 0.05 R per trade
+  min_stable_thirds: 2       # positive in at least 2 of the 3 thirds of the discovery period
+  validate_p: 0.05           # held-out check (Bonferroni-corrected over the patterns found)
+  max_patterns: 20
+  use_verdicts: [confirmed]  # which patterns `mode: patterns` may signal from
+  patterns_file: reports/patterns_latest.json
+  fixed_spread_points: 20    # one realistic spread (0.20 USD) for every year; broker spreads were 40 pts in 2015, ~5 in 2021
+  round_steps: [50, 100]     # round-number levels: 4000, 4050, 4100 ...
+  level_days: [5, 20]        # major support / resistance: the 5-day and 20-day high and low
+  pin_wick_ratio: 0.6        # price action: pin bar = rejection wick >= 60% of the candle ...
+  pin_min_atr: 1.0           # ... and candle range >= 1 ATR
+  level_touch_atr: 0.25      # "at a level" = within 0.25 ATR of it
+  news_times_ny: ["08:30", "10:00", "14:00"]   # US data / FOMC release times (New York clock)
+  news_spike_atr: 2.5        # news shock: the release candle is >= 2.5 ATR long
+  timeframes:                # swing versions: python -m quant_engine patterns --timeframe H1 (or H4)
+    H1:                      # counts are H1 candles; ATR = ATR(14) on H1
+      tp_atr: [1.0, 2.0, 3.0]
+      horizons: [8, 24]      # hold up to 8 h / 1 day
+      sweep_lookbacks: [24, 72]   # last 1 day / 3 days
+      move_bars: 6
+      range_bars: 24
+    H4:                      # counts are H4 candles; ATR = ATR(14) on H4
+      tp_atr: [1.0, 2.0, 3.0]
+      horizons: [6, 18]      # hold up to 1 day / 3 days
+      sweep_lookbacks: [6, 30]    # last 1 day / 5 days
+      move_bars: 3
+      range_bars: 12
+  costs:                     # charged in every research backtest (rulebook rule 6)
+    min_spread_points: 8       # floor under the historical bar spread ($0.08, owner's broker)
+    commission_per_lot: 0      # USD per lot round trip (owner confirmed 0 on 2026-11-26)
+    contract_size: 100         # 1 lot = 100 oz
+    slippage_points: 2         # per side on market / stop fills ($0.02). GUESS
+  regime4:                   # bullish / bearish / sideways / uncertain on H4 (rulebook rule 4)
+    ema_period: 50
+    slope_bars: 10
+    trend_slope_atr: 0.5       # GUESS
+    confirm_bars: 2
+    flat_slope_atr: 0.2        # GUESS
+    range_bars: 30
+    range_max_atr: 8.0         # GUESS
+  bigmoves:                  # python -m quant_engine bigmoves (30-50 pip moves within 30 minutes)
+    pip_usd: 0.10            # gold: 1 pip = $0.10, so 30 pips = $3
+    move_pips: [30, 50]
+    window_bars: 6           # 6 M5 candles = 30 minutes
+    target_pips: [30, 50]
+    stop_pips: [20, 30, 50]

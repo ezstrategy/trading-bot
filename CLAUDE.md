@@ -6,7 +6,9 @@ If a request conflicts with them, stop and ask the owner.
 ## What this project is
 - A **signals-only** engine for **XAUUSD** intraday scalping.
 - Entry timeframe **M5**, confirmation **M15**, context **H1/H4**.
-- Risk model: **0.5% per trade** (used only to size the numbers shown in a signal).
+- Risk model (owner, 2026-11-27): **natural stop first, sizing second**. The stop is the strategy's own
+  invalidation level and is never tightened or moved to fit the account; size for at most **2%** of equity
+  at that stop, costs included; if 0.01 lot would risk more, **skip** the signal. (Was 0.5%.)
 - Signals are delivered to Telegram (from Phase 2+). Broker not selected yet; data comes from MetaTrader 5.
 - Other symbols are out of scope until the owner asks.
 
@@ -44,3 +46,9 @@ If a request conflicts with them, stop and ask the owner.
 15. Work in phases. Finish the current phase, run the tests, fix failures, write a completion
     report, then **wait for the owner's review before starting the next phase**.
 16. Mark assumptions clearly ("GUESS:" in code comments or in the report) and ask when unsure.
+
+## Research rules (owner, 2026-11-26)
+17. All strategy research follows `docs/RESEARCH_RULEBOOK.md` (no mass parameter sweeps,
+    development / validation / untouched out-of-sample split + walk-forward, full costs incl.
+    commission and slippage, the 14 required metrics, independent audit, rule-14 classification).
+18. Log every experiment in `docs/EXPERIMENT_LOG.md`; never overwrite a tested version.

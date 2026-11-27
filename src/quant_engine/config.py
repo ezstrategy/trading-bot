@@ -49,6 +49,8 @@ class TimeframesConfig(BaseModel):
 
 class RiskConfig(BaseModel):
     per_trade_pct: float = Field(0.5, gt=0, le=5)
+    # owner rule 2026-11-27: skip a signal when the minimum lot would risk more than per_trade_pct
+    skip_if_min_lot_over: bool = True
 
 
 class LoggingConfig(BaseModel):
@@ -339,6 +341,82 @@ class BacktestConfig(BaseModel):
     regime_min_slope_atr: float = Field(0.5, ge=0)
 
 
+class CostsConfig(BaseModel):
+    """Trading costs charged in research backtests (rulebook rule 6)."""
+    min_spread_points: float = Field(8.0, ge=0)        # floor under the historical bar spread (owner: $0.08)
+    commission_per_lot: float = Field(0.0, ge=0)       # USD per lot, round trip (owner: 0, 2026-11-26)
+    contract_size: float = Field(100.0, gt=0)          # XAUUSD: 1 lot = 100 oz
+    slippage_points: float = Field(2.0, ge=0)          # per side on market / stop fills. GUESS
+
+
+class Regime4Config(BaseModel):
+    """Four-state H4 regime (rulebook rule 4). All values in H4 candles / H4 ATR(14)."""
+    ema_period: int = Field(50, ge=5)
+    slope_bars: int = Field(10, ge=2)
+    trend_slope_atr: float = Field(0.5, gt=0)          # EMA rise over slope_bars for a trend. GUESS
+    confirm_bars: int = Field(2, ge=1)                 # trend must hold this many H4 closes in a row
+    flat_slope_atr: float = Field(0.2, ge=0)           # |EMA change| below this = flat. GUESS
+    range_bars: int = Field(30, ge=5)                  # sideways: the last range_bars H4 candles ...
+    range_max_atr: float = Field(8.0, gt=0)            # ... span at most this many ATR. GUESS
+
+
+class ResearchConfig(BaseModel):
+    """Pattern mining (``python -m quant_engine patterns``). Distances are in M5 ATR(14).
+
+    Discovery uses the older ``discover_frac`` of the data; the newer part is held out
+    and only used to check the patterns found (never to find them)."""
+    discover_frac: float = Field(0.6, gt=0.2, lt=0.9)
+    sl_atr: list[float] = Field(default_factory=lambda: [1.0])
+    tp_atr: list[float] = Field(default_factory=lambda: [1.0, 2.0])
+    horizons: list[int] = Field(default_factory=lambda: [12, 36])     # M5 candles (1h, 3h)
+    sweep_lookbacks: list[int] = Field(default_factory=lambda: [24, 72])   # M5 candles (2h, 6h)
+    impulse_body_atr: float = Field(1.5, gt=0)
+    impulse_body_ratio: float = Field(0.6, gt=0, le=1)
+    move_bars: int = Field(12, ge=2)
+    move_atr: float = Field(3.0, gt=0)
+    range_bars: int = Field(48, ge=6)
+    range_min_atr: float = Field(3.0, gt=0)
+    range_max_atr: float = Field(10.0, gt=0)
+    range_edge: float = Field(0.1, gt=0, lt=0.5)
+    min_trades_discover: int = Field(30, ge=5)
+    min_trades_validate: int = Field(15, ge=3)
+    fdr_q: float = Field(0.10, gt=0, lt=1)
+    min_avg_r: float = Field(0.05, ge=0)
+    min_stable_thirds: int = Field(2, ge=0, le=3)
+    validate_p: float = Field(0.05, gt=0, lt=1)
+    max_patterns: int = Field(20, ge=1)
+    use_verdicts: list[str] = Field(default_factory=lambda: ["confirmed"])
+    patterns_file: str = "reports/patterns_latest.json"
+    fixed_spread_points: float | None = Field(None, ge=0)   # one spread for every year (None = bar spreads)
+    round_steps: list[float] = Field(default_factory=lambda: [50.0, 100.0])  # round-number levels in USD
+    level_days: list[int] = Field(default_factory=lambda: [5, 20])          # multi-day highs/lows (S/R)
+    pin_wick_ratio: float = Field(0.6, gt=0, lt=1)
+    pin_min_atr: float = Field(1.0, gt=0)
+    level_touch_atr: float = Field(0.25, ge=0)
+    news_times_ny: list[str] = Field(default_factory=lambda: ["08:30", "10:00", "14:00"])
+    news_spike_atr: float = Field(2.5, gt=0)
+    timeframes: dict[str, dict] = Field(default_factory=dict)   # overrides per entry timeframe (H1, H4)
+    only_families: list[str] | None = None   # test only these idea families (None = all)
+    exit_units: Literal["atr", "usd"] = "atr"   # usd: sl_atr / tp_atr are dollar distances
+    costs: CostsConfig = Field(default_factory=CostsConfig)
+    regime4: Regime4Config = Field(default_factory=Regime4Config)
+    bigmoves: dict = Field(default_factory=lambda: {
+        "pip_usd": 0.10, "move_pips": [30, 50], "window_bars": 6,
+        "target_pips": [30, 50], "stop_pips": [20, 30, 50]})
+
+    def for_timeframe(self, tf: str) -> "ResearchConfig":
+        """These settings with the overrides for entry timeframe ``tf`` (e.g. H1) applied."""
+        extra = self.timeframes.get(str(tf).upper(), {})
+        return ResearchConfig(**{**self.model_dump(), **extra}) if extra else self
+
+    @field_validator("sl_atr", "tp_atr", "horizons", "sweep_lookbacks", "round_steps", "level_days")
+    @classmethod
+    def _non_empty(cls, v: list) -> list:
+        if not v or any(x <= 0 for x in v):
+            raise ValueError("must be a non-empty list of positive numbers")
+        return v
+
+
 class StrategyConfig(BaseModel):
     atr_period: int = Field(14, ge=1)
     swings: dict[Timeframe, int] = Field(default_factory=lambda: {
@@ -349,11 +427,12 @@ class StrategyConfig(BaseModel):
     liquidity: LiquidityConfig = Field(default_factory=LiquidityConfig)
     sessions: SessionsConfig = Field(default_factory=SessionsConfig)
     volatility: VolatilityConfig = Field(default_factory=VolatilityConfig)
-    mode: Literal["regime", "v1", "bullish", "bearish", "sideways"] = "regime"
+    mode: Literal["regime", "v1", "bullish", "bearish", "sideways", "patterns"] = "regime"
     news: NewsConfig = Field(default_factory=NewsConfig)
     modes: ModesConfig = Field(default_factory=ModesConfig)
     entry: EntryConfig = Field(default_factory=EntryConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)
+    research: ResearchConfig = Field(default_factory=ResearchConfig)
 
     @field_validator("swings", mode="before")
     @classmethod

@@ -33,6 +33,17 @@ def test_lot_size_rounds_down_to_step_and_flags_min_lot():
     assert tiny.lots == 0.01 and "minimum lot" in tiny.note
 
 
+def test_lot_size_natural_stop_costs_and_skip():
+    # $500 at 2% = $10. Stop $8 + $0.06 costs per oz -> $806 per lot -> 0.01 lot ($8.06)
+    s = lot_size(500, 2.0, 2400.0, 2392.0, 100, 0.01, 0.01, cost_per_unit=0.06, skip_if_over=True)
+    assert s.lots == 0.01 and s.risk_money == pytest.approx(8.06) and not s.skipped
+    # stop $12: 0.01 lot loses $12.06 > $10 -> skipped, never resized
+    w = lot_size(500, 2.0, 2400.0, 2388.0, 100, 0.01, 0.01, cost_per_unit=0.06, skip_if_over=True)
+    assert w.skipped and w.lots == 0 and "2.41%" in w.note
+    c = lot_size(500, 2.0, 2400.0, 2392.0, 100, 0.01, 0.01, commission_per_lot=300, skip_if_over=True)
+    assert c.skipped    # commission counted: $8 + $3 per 0.01 lot > $10
+
+
 # ------------------------------------------------------------------- telegram
 def test_telegram_sends_html_with_reply_and_never_needs_hardcoded_token(monkeypatch):
     calls = []
@@ -130,7 +141,8 @@ def test_live_signal_then_followups_as_replies(tmp_path, replay_bars):
     res = _step(eng, clk, 12)
     assert sum(1 for r in res if r["new_signal"]) == 1
     texts = [t for t, _ in rec.sent]
-    assert "SELL LIMIT" in texts[0] and "0.16 lot" in texts[0] and "no trade was placed" in texts[0]
+    # 2% of $10,000 at the stop, spread floor + slippage included (owner rule 2026-11-27; was 0.16 at 0.5%)
+    assert "SELL LIMIT" in texts[0] and "0.63 lot (2% risk)" in texts[0] and "no trade was placed" in texts[0]
     assert texts[1:] == ["✅ Filled at 2,382.78", "❌ Stopped out (−1R)"]
     assert all(reply == 1 for _, reply in rec.sent[1:])              # follow-ups reply to the signal
     st = EngineState(tmp_path / "signals")                             # persisted

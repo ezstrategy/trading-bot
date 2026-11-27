@@ -12,7 +12,7 @@ def test_repo_config_loads(cfg):
     assert cfg.engine.timeframes.confirmation is Timeframe.M15
     assert cfg.engine.timeframes.context == [Timeframe.H1, Timeframe.H4]
     assert set(cfg.engine.timeframes.collect) == set(Timeframe)
-    assert cfg.engine.risk.per_trade_pct == 0.5
+    assert cfg.engine.risk.per_trade_pct == 2.0 and cfg.engine.risk.skip_if_min_lot_over
     assert cfg.mapping("xauusd").candidates[0] == "XAUUSD"
 
 

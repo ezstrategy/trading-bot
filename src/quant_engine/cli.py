@@ -10,6 +10,18 @@
     python -m quant_engine dashboard [--port 8501]
     python -m quant_engine dukascopy --start 2026-05-01 [--end 2026-11-24]   (free history, no MT5)
     python -m quant_engine backtest [--source mt5|dukascopy] [--mode regime|v1|bullish|bearish|sideways|compare]
+    python -m quant_engine patterns [--source mt5|dukascopy] [--timeframe M5|H1|H4]   (find repeatable patterns)
+    python -m quant_engine bigmoves [--start 2020-01-01]   (30-50 pip moves in 30 min: causes + strategy test)
+    python -m quant_engine entries [--start 2020-01-01]    (your dip/sweep + reversal candle entry, backtested)
+    python -m quant_engine classics [--start 2020-01-01]   (well-known public strategies, backtested)
+    python -m quant_engine london [--start 2020-01-01]     (polish the London breakout, checked on unseen data)
+    python -m quant_engine gtc [--start 2020-01-01]        (owner's GTC-SBR strategy: experiments A-F, audit report)
+    python -m quant_engine lb-natural                      (EXP-020: natural stop + 2% sizing, skipped-signal count)
+    python -m quant_engine lb-scaleout                     (EXP-018: 3-part T1/T2/T3 exit on the gold breakout, one run)
+    python -m quant_engine lb-symbols                      (EXP-017: same London breakout on silver / FX, one run)
+    python -m quant_engine lb-phase2                       (EXP-016: London breakout Phase 2 research, one run)
+    python -m quant_engine london-oos                      (EXP-015: one-shot London breakout test on 2015-2019)
+    python -m quant_engine study [--start 2020-01-01]      (rule 2: how gold behaves in each regime, development data)
     python -m quant_engine run [--dry-run] [--once]      (live signals to Telegram; never trades)
     python -m quant_engine news                           (refresh the economic calendar, show blocks)
     python -m quant_engine telegram-test                  (send a test message)
@@ -48,9 +60,14 @@ def _range(args: argparse.Namespace, default_days: int) -> tuple[pd.Timestamp, p
     return start, end
 
 
+# GUESS: usual 5-digit broker tick sizes; pass --point if your broker differs.
+POINTS = {"XAUUSD": 0.01, "XAGUSD": 0.001, "EURUSD": 0.00001, "GBPUSD": 0.00001, "USDJPY": 0.001}
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="quant_engine", description="XAUUSD Quant Engine (signals only)")
     p.add_argument("--config", help="config folder (default ./config)")
+    p.add_argument("--instrument", help="research another symbol (XAGUSD, EURUSD, GBPUSD, USDJPY); default from engine.yaml")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("check", help="connect, resolve symbol and show server time offset")
     s = sub.add_parser("symbols", help="list broker symbols")
@@ -81,9 +98,115 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--start")
     bt.add_argument("--end")
     bt.add_argument("--point", type=float, default=0.01, help="tick size (XAUUSD: 0.01)")
-    bt.add_argument("--mode", choices=["regime", "v1", "bullish", "bearish", "sideways", "compare"],
+    bt.add_argument("--mode", choices=["regime", "v1", "bullish", "bearish", "sideways", "patterns", "compare"],
                     help="strategy to test (default: strategy.mode in config); compare = all modes x markets")
     bt.add_argument("--out", help="report folder (default reports/backtest_<source>_<time>)")
+    pt = sub.add_parser("patterns", help="find repeatable patterns per market type and test them on unseen data")
+    pt.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    pt.add_argument("--start")
+    pt.add_argument("--end")
+    pt.add_argument("--point", type=float, default=0.01, help="tick size (XAUUSD: 0.01)")
+    pt.add_argument("--timeframe", choices=["M5", "H1", "H4"], default="M5",
+                    help="M5 = scalps; H1 / H4 = swing trades with bigger stops and targets")
+    pt.add_argument("--price-action", action="store_true",
+                    help="test only price-action setups (pin bars, engulfing, inside bars, at levels or not)")
+    pt.add_argument("--out", help="report folder (default reports/patterns_<source>_<timeframe>_<time>)")
+    bg = sub.add_parser("bigmoves", help="big fast moves: what comes before them + a simple strategy test")
+    bg.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    bg.add_argument("--start", default="2020-01-01")
+    bg.add_argument("--end")
+    bg.add_argument("--point", type=float, default=0.01)
+    bg.add_argument("--targets", help="target pips, comma separated (e.g. 10,20)")
+    bg.add_argument("--stops", help="stop pips, comma separated (e.g. 5,10)")
+    bg.add_argument("--windows", help="time limits in M5 candles, comma separated (e.g. 6,12)")
+    bg.add_argument("--move-pips", help="move sizes for the 'how often' steps (e.g. 10,20)")
+    bg.add_argument("--spread-points", type=float, help="spread charged per trade in points (gold: 8 = $0.08)")
+    bg.add_argument("--out")
+    en = sub.add_parser("entries", help="the owner's entry: sweep of a 30-min low/high + reversal candle")
+    en.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    en.add_argument("--start", default="2020-01-01")
+    en.add_argument("--end")
+    en.add_argument("--point", type=float, default=0.01)
+    en.add_argument("--spread-points", type=float, default=8.0, help="spread per trade in points (8 = $0.08)")
+    en.add_argument("--example", action="append", default=None,
+                    help='your trade to check, "YYYY-MM-DD HH:MM,BUY" in UTC (repeatable)')
+    en.add_argument("--out")
+    cl = sub.add_parser("classics", help="backtest well-known public strategies (London breakout, ORB, RSI2, ...)")
+    cl.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    cl.add_argument("--start", default="2020-01-01")
+    cl.add_argument("--end")
+    cl.add_argument("--point", type=float, default=0.01)
+    cl.add_argument("--spread-points", type=float, default=8.0, help="spread per trade in points (8 = $0.08)")
+    cl.add_argument("--out")
+    lo = sub.add_parser("london", help="polish the London breakout: test changes, pick on older data, check unseen")
+    lo.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    lo.add_argument("--start", default="2020-01-01")
+    lo.add_argument("--end")
+    lo.add_argument("--point", type=float, help="tick size (default per instrument: XAUUSD 0.01, XAGUSD 0.001, "
+                                                "EURUSD/GBPUSD 0.00001, USDJPY 0.001)")
+    lo.add_argument("--spread-points", type=float,
+                    help="spread per trade in points (default: 8 for XAUUSD, else the median bar spread of the last year)")
+    lo.add_argument("--min-trades", type=int, default=300, help="fewest older-data trades for the chosen version")
+    lo.add_argument("--grid", choices=["standard", "high-win"], default="standard",
+                    help="high-win = small targets, TP1 half close + runner, early break-even")
+    lo.add_argument("--min-win", type=float, default=0.0, help="choose only among versions winning this %% or more")
+    lo.add_argument("--out")
+    gt = sub.add_parser("gtc", help="GTC-SBR session breakout and retest: experiments A-F, splits, stress, stability")
+    gt.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    gt.add_argument("--start", default="2020-01-01")
+    gt.add_argument("--end")
+    gt.add_argument("--point", type=float, default=0.01)
+    gt.add_argument("--out")
+    sy = sub.add_parser("study", help="describe gold's behaviour per regime (development data only by default)")
+    sy.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    sy.add_argument("--start", default="2020-01-01")
+    sy.add_argument("--end")
+    sy.add_argument("--part", choices=["development", "all"], default="development")
+    sy.add_argument("--regime-tf", choices=["H4", "H1"], default="H4", help="timeframe the regime is worked out on")
+    sy.add_argument("--out")
+    lu = sub.add_parser("london-oos", help="EXP-015: one-shot London breakout test on untouched 2015-2019 data")
+    lu.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    lu.add_argument("--start", default="2015-01-01")
+    lu.add_argument("--end", default="2020-01-01")
+    lu.add_argument("--point", type=float, default=0.01)
+    lu.add_argument("--out")
+    mc = sub.add_parser("montecarlo", help="EXP-019: Monte Carlo account survival of the frozen gold breakout")
+    mc.add_argument("--trades", default="research_data/exp016_trades_original.csv")
+    mc.add_argument("--balance", type=float, default=500.0)
+    mc.add_argument("--leverage", type=float, default=500.0)
+    mc.add_argument("--risks", default="1,2,3,4,5")
+    mc.add_argument("--paths", type=int, default=10_000)
+    mc.add_argument("--length", type=int, default=500)
+    mc.add_argument("--since", default="2023-01-01", help="use trades from this date ('' = all)")
+    mc.add_argument("--out")
+    ln = sub.add_parser("lb-natural", help="EXP-020: natural stop first, 2% sizing second (skip count)")
+    ln.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    ln.add_argument("--start", default="2015-01-01")
+    ln.add_argument("--end")
+    ln.add_argument("--point", type=float, default=0.01)
+    ln.add_argument("--balances", default="500,1000,2500,5000")
+    ln.add_argument("--risk", type=float, default=None, help="max risk %% (default: engine risk.per_trade_pct)")
+    ln.add_argument("--leverage", type=float, default=500)
+    ln.add_argument("--out")
+    so = sub.add_parser("lb-scaleout", help="EXP-018: 3-part scale-out exit (T1/T2/T3) on the gold London breakout")
+    so.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    so.add_argument("--start", default="2015-01-01")
+    so.add_argument("--end")
+    so.add_argument("--point", type=float, default=0.01)
+    so.add_argument("--out")
+    ls_ = sub.add_parser("lb-symbols", help="EXP-017: unchanged London breakout on XAGUSD, EURUSD, GBPUSD, USDJPY")
+    ls_.add_argument("--symbols", default="XAGUSD,EURUSD,GBPUSD,USDJPY")
+    ls_.add_argument("--start", default="2015-01-01")
+    ls_.add_argument("--end")
+    ls_.add_argument("--out")
+    l2 = sub.add_parser("lb-phase2", help="EXP-016: Phase 2 research on the London Asian-range breakout")
+    l2.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    l2.add_argument("--start", default="2015-01-01")
+    l2.add_argument("--end")
+    l2.add_argument("--point", type=float, default=0.01)
+    l2.add_argument("--calendar", default="data/news/history.csv",
+                    help="historical calendar CSV (time UTC, currency, impact, title); H5 is skipped without it")
+    l2.add_argument("--out")
     rn = sub.add_parser("run", help="live signal engine: watch MT5, send signals to Telegram (never trades)")
     rn.add_argument("--dry-run", action="store_true", help="print messages instead of sending to Telegram")
     rn.add_argument("--once", action="store_true", help="run one cycle and exit")
@@ -175,6 +298,28 @@ def _backtest(cfg, store: ParquetStore, canonical: str, args: argparse.Namespace
     return 0
 
 
+def _patterns(cfg, store: ParquetStore, canonical: str, args: argparse.Namespace) -> int:
+    from .research.runner import run_patterns
+    ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+    note = ("Dukascopy XAU/USD spot, BID M1 candles (UTC), resampled; spread assumed"
+            if args.source == "dukascopy" else f"MT5 broker bars for {canonical} (UTC)")
+    start = pd.Timestamp(args.start, tz="UTC") if args.start else None
+    end = pd.Timestamp(args.end, tz="UTC") if args.end else None
+    out = args.out or f"reports/patterns_{args.source}_{args.timeframe}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+    try:
+        from .research.events import PRICE_ACTION_FAMILIES
+        summary = run_patterns(cfg, store, ds, args.point, out, start, end, note, timeframe=args.timeframe,
+                               only_families=list(PRICE_ACTION_FAMILIES) if args.price_action else None)
+    except ValueError as exc:
+        hint = "python -m quant_engine dukascopy --days 365" if args.source == "dukascopy" \
+            else "python -m quant_engine download --days 365"
+        print(f"{exc}. Run: {hint}", file=sys.stderr)
+        return 1
+    print(json.dumps(summary, indent=2, default=str))
+    print(f"Report: {out}/report.md")
+    return 0
+
+
 def _news(cfg, fetch_text, now) -> int:
     from .features.news import NewsCalendar, refresh_calendar
     nc = cfg.strategy.news
@@ -229,6 +374,13 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
     lc = cfg.engine.logging
     setup_logging(lc.level, lc.json_format, lc.file)
     store = ParquetStore(cfg.data.storage.root)
+    if args.instrument:
+        cfg = cfg.model_copy(update={"engine": cfg.engine.model_copy(update={"instrument": args.instrument.upper()})})
+        try:
+            cfg.mapping()                           # fails early if symbols.yaml has no entry
+        except ConfigError as exc:
+            print(f"Config error: {exc}", file=sys.stderr)
+            return 2
     canonical = cfg.engine.instrument
 
     if args.cmd == "validate":
@@ -244,6 +396,189 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
         return _dukascopy(cfg, store, canonical, args, fetch)
     if args.cmd == "backtest":
         return _backtest(cfg, store, canonical, args)
+    if args.cmd == "bigmoves":
+        from .research.bigmoves import run_bigmoves
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/bigmoves_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        try:
+            summary = run_bigmoves(cfg, store, ds, args.point, out,
+                                   pd.Timestamp(args.start, tz="UTC") if args.start else None,
+                                   pd.Timestamp(args.end, tz="UTC") if args.end else None,
+                                   f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)",
+                                   overrides={k: [float(x) if k != "window_bars" else int(x) for x in v.split(",")]
+                                              for k, v in (("target_pips", args.targets), ("stop_pips", args.stops),
+                                                           ("window_bars", args.windows), ("move_pips", args.move_pips))
+                                              if v} | ({"spread_points": args.spread_points}
+                                                       if args.spread_points is not None else {}))
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2, default=str))
+        print(f"Report: {out}/report.md")
+        return 0
+    if args.cmd == "study":
+        from .research.study import run_study
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/study_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        try:
+            summary = run_study(cfg, store, ds, out, pd.Timestamp(args.start, tz="UTC") if args.start else None,
+                                pd.Timestamp(args.end, tz="UTC") if args.end else None, args.part,
+                                f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)",
+                                Timeframe.parse(args.regime_tf))
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2, default=str))
+        print(f"Report: {out}/report.md")
+        return 0
+    if args.cmd == "montecarlo":
+        from .research.montecarlo import run_montecarlo
+        out = args.out or f"reports/montecarlo_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        res = run_montecarlo(args.trades, out, args.balance, args.leverage,
+                             tuple(float(x) for x in args.risks.split(",")), args.paths, args.length,
+                             since=args.since or None)
+        print(json.dumps({"inputs": res["inputs"], "levels": {k: {x: v[x] for x in ("p_lose_50pct", "p_dd_over_30pct",
+                          "p_reach_1000")} for k, v in res["levels"].items()}}, indent=2, default=str))
+        print(f"Results: {out}/results.json")
+        return 0
+    if args.cmd == "lb-natural":
+        from .research.lb_natural import run_lb_natural
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/lb_natural_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        try:
+            res = run_lb_natural(cfg, store, ds, args.point, out, pd.Timestamp(args.start, tz="UTC"),
+                                 pd.Timestamp(args.end, tz="UTC") if args.end else None,
+                                 f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)",
+                                 tuple(float(x) for x in args.balances.split(",")),
+                                 args.risk or cfg.engine.risk.per_trade_pct, args.leverage)
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps([{k: r[k] for k in ("version", "window", "start_balance", "signals", "taken", "skipped",
+                                              "skipped%", "end_balance", "max_dd%")} for r in res["sizing"]],
+                         indent=1, default=str))
+        print(f"Report: {res['report']}")
+        return 0
+    if args.cmd == "lb-scaleout":
+        from .research.lb_scaleout import run_lb_scaleout
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/lb_scaleout_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        try:
+            summary = run_lb_scaleout(cfg, store, ds, args.point, out, pd.Timestamp(args.start, tz="UTC"),
+                                      pd.Timestamp(args.end, tz="UTC") if args.end else None,
+                                      f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)")
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2, default=str))
+        print(f"Report: {out}/report.md")
+        return 0
+    if args.cmd == "lb-symbols":
+        from .research.lb_symbols import run_lb_symbols
+        out = args.out or f"reports/lb_symbols_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        syms = tuple(x.strip().upper() for x in args.symbols.split(",") if x.strip())
+        summary = run_lb_symbols(cfg, store, POINTS, out, pd.Timestamp(args.start, tz="UTC"),
+                                 pd.Timestamp(args.end, tz="UTC") if args.end else None, syms)
+        print(json.dumps(summary, indent=2, default=str))
+        print(f"Report: {out}/report.md")
+        return 0
+    if args.cmd == "lb-phase2":
+        from .research.lb_phase2 import run_lb_phase2
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/lb_phase2_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        try:
+            summary = run_lb_phase2(cfg, store, ds, args.point, out, pd.Timestamp(args.start, tz="UTC"),
+                                    pd.Timestamp(args.end, tz="UTC") if args.end else None, args.calendar,
+                                    f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)")
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2, default=str))
+        print(f"Report: {out}/report.md")
+        return 0
+    if args.cmd == "london-oos":
+        from .research.london_oos import run_london_oos
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/london_oos_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        try:
+            summary = run_london_oos(cfg, store, ds, args.point, out, pd.Timestamp(args.start, tz="UTC"),
+                                     pd.Timestamp(args.end, tz="UTC"),
+                                     f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)")
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2, default=str))
+        print(f"Report: {out}/report.md")
+        return 0
+    if args.cmd == "gtc":
+        from .research.gtc_sbr import run_gtc
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/gtc_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        try:
+            summary = run_gtc(cfg, store, ds, args.point, out,
+                              pd.Timestamp(args.start, tz="UTC") if args.start else None,
+                              pd.Timestamp(args.end, tz="UTC") if args.end else None,
+                              f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)")
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2, default=str))
+        print(f"Report: {out}/report.md")
+        return 0
+    if args.cmd == "london":
+        from .research.london import run_london
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/london_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        try:
+            summary = run_london(cfg, store, ds, args.point or POINTS.get(canonical, 0.01), out,
+                                 pd.Timestamp(args.start, tz="UTC") if args.start else None,
+                                 pd.Timestamp(args.end, tz="UTC") if args.end else None,
+                                 f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)",
+                                 spread_points=args.spread_points if args.spread_points is not None
+                                 else (8.0 if canonical == "XAUUSD" else None), min_trades=args.min_trades,
+                                 grid=args.grid, min_win=args.min_win)
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2, default=str))
+        print(f"Report: {out}/report.md")
+        return 0
+    if args.cmd == "classics":
+        from .research.classics import run_classics
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/classics_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        try:
+            summary = run_classics(cfg, store, ds, args.point, out,
+                                   pd.Timestamp(args.start, tz="UTC") if args.start else None,
+                                   pd.Timestamp(args.end, tz="UTC") if args.end else None,
+                                   f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)",
+                                   spread_points=args.spread_points)
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2, default=str))
+        print(f"Report: {out}/report.md")
+        return 0
+    if args.cmd == "entries":
+        from .research.entries import OWNER_EXAMPLES, run_entries
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/entries_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        examples = OWNER_EXAMPLES if args.example is None else [
+            (e.split(",")[0].strip(), 1 if e.split(",")[1].strip().upper() == "BUY" else -1) for e in args.example]
+        try:
+            summary = run_entries(cfg, store, ds, args.point, out,
+                                  pd.Timestamp(args.start, tz="UTC") if args.start else None,
+                                  pd.Timestamp(args.end, tz="UTC") if args.end else None,
+                                  f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)",
+                                  examples=examples, overrides={"spread_points": args.spread_points})
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2, default=str))
+        print(f"Report: {out}/report.md")
+        return 0
+    if args.cmd == "patterns":
+        return _patterns(cfg, store, canonical, args)
     if args.cmd == "news":
         return _news(cfg, fetch_text, now)
     if args.cmd == "telegram-test":

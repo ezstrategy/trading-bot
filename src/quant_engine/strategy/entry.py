@@ -70,6 +70,7 @@ class Signal:
     reasons: list[str] = field(default_factory=list)
     strategy: str = "v1"          # which model produced it (v1, bullish, bearish, sideways)
     time_stop_candles: int | None = None   # mode-specific time stop (None = entry.time_stop_candles)
+    close_by: pd.Timestamp | None = None   # close anything still open then (None = kill zone end + session_close_hours)
 
     @property
     def side(self) -> str:

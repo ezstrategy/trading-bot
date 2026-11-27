@@ -182,3 +182,51 @@ def news_table(cfg: AppConfig, now: pd.Timestamp, refresh: bool = False) -> pd.D
     cal = NewsCalendar(events, nc)
     return pd.DataFrame([{"start": w.start, "end": w.end, "event": w.event_time, "tier": w.tier, "title": w.title}
                          for w in cal.windows if w.end > now])
+
+
+# ------------------------------------------------------------------ research results (read only)
+RESEARCH = {  # report folder prefix -> what it is (newest folder of each is shown)
+    "lb_natural": "EXP-020 natural stop + 2% sizing (skipped signals)",
+    "montecarlo": "EXP-019 Monte Carlo account survival",
+    "lb_scaleout": "EXP-018 scale-out exit (T1/T2/T3)",
+    "lb_symbols": "EXP-017 other instruments",
+    "lb_phase2": "EXP-016 Phase 2 (verify + H1-H6 + exits A-F)",
+    "london_oos": "EXP-015 untouched 2015-2019 test",
+}
+GOLD_TRADES = "research_data/exp016_trades_original.csv"
+
+
+def research_reports(root: str = "reports") -> dict[str, Path]:
+    """Newest report folder for each research experiment in :data:`RESEARCH` that has been run."""
+    p, out = Path(root), {}
+    if not p.exists():
+        return out
+    for prefix in RESEARCH:
+        found = sorted(d for d in p.glob(f"{prefix}_*")
+                       if d.is_dir() and ((d / "report.md").exists() or (d / "results.json").exists()))
+        if found:
+            out[prefix] = found[-1]
+    return out
+
+
+def gold_trades(path: str = GOLD_TRADES) -> pd.DataFrame:
+    """The frozen gold breakout's trade list (costs included), or an empty frame."""
+    f = Path(path)
+    if not f.exists():
+        return pd.DataFrame()
+    tr = pd.read_csv(f)
+    tr["entry_time"] = pd.to_datetime(tr["entry_time"], utc=True)
+    return tr
+
+
+def trade_summary(tr: pd.DataFrame) -> dict:
+    """Trades, win %, PF, R per trade and total R of a trade list (computed here, nothing hand-typed)."""
+    if tr.empty:
+        return {"trades": 0}
+    r = tr["r"].to_numpy(float)
+    gains, losses = r[r > 0].sum(), -r[r < 0].sum()
+    eq = np.cumsum(r)
+    return {"trades": int(len(r)), "win%": round(100 * float((r > 0).mean()), 1),
+            "PF": round(float(gains / losses), 2) if losses > 0 else None,
+            "R/trade": round(float(r.mean()), 3), "total R": round(float(r.sum()), 1),
+            "max DD (R)": round(float((np.maximum.accumulate(np.r_[0, eq]) - np.r_[0, eq]).max()), 1)}
