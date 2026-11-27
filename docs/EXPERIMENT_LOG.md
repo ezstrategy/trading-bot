@@ -220,3 +220,24 @@ $4,113 at the median stop, $15,380 for 95% of trades. Audit: the original's 27-l
 even exits (-0.035R after costs) as losses. One trade (of 2,154) exits stop/breakeven/breakeven: the
 break-even step can trigger on the fill candle while a target cannot (same convention as the original
 code); negligible.
+
+## EXP-019 (2026-11-27): Monte Carlo account survival, $500 at 1:500, risk 1-5% (strategy frozen)
+- **Question (owner)**: can the frozen EXP-016 original run on a $500 live account at 1:500, 5% risk?
+  No strategy change; the same 695 trades since 2023 (`research_data/exp016_trades_original.csv`,
+  costs included) feed every risk level.
+- **Method**: `python -m quant_engine montecarlo` (`research/montecarlo.py`). 10,000 paths x 500
+  trades per level, circular block bootstrap (10-trade blocks, same random draws for all levels), lot
+  floored to 0.01 (100 oz contract), margin at 1:500, stop-out at 50% margin level (GUESS, broker not
+  chosen), swap 0 (trades close same day). Two policies: `min_lot` (always trade, at least 0.01) and
+  `skip` (skip a signal when 0.01 lot risks more than the target %). Checks: block length 1 and 30,
+  edge at the lower 95% bound, zero edge, costs x2; full history as secondary.
+- **Key fact**: median stop $13.62 per oz, so 0.01 lot risks 2.7% of $500 (5.7% at the p95 stop).
+- **Results (min_lot)**: every level loses half the account in 23-26% of paths; P(DD>30%) 71% at 1%
+  up to 100% at 5%. The risk % barely changes ruin because 0.01 lot dominates.
+- **Results (skip)**: 1%: 91% of signals skipped (median $536 after 500 trades). 2%: 58% skipped,
+  P(lose 30%) 0.7%, P(DD>30%) 4.8%, P(reach $1,000) 16%, median $671. 3%: P(lose 50%) 0.4%,
+  P(DD>30%) 58%, median $960. 5%: P(lose 50%) 10.5%, P(DD>50%) 68%, median $1,797; at the
+  lower-bound edge P(lose 50%) 47.8%.
+- **Conclusion**: do not use 5%. On $500, 2% with the skip rule is the survival-based choice and 3%
+  the upper limit; for real 1-2% sizing on every signal the account needs about $1,400-2,850.
+  Strategy class unchanged ("promising, needs forward validation"); forward paper trading first.

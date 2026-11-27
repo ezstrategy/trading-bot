@@ -211,3 +211,28 @@ def test_lb_scaleout_cli(config_dir, tmp_path, monkeypatch):
     for k in ("since 2023 (main)", "last 2 years", "S1 1/2/3R, BE after T1 (main)", "T1_reached%",
               "3 x 0.01 = 0.03 lots", "Verdict per version"):
         assert k in md, k
+
+
+def test_montecarlo_sizing_min_lot_and_skip(tmp_path):
+    from quant_engine.research import montecarlo as M
+    rng = np.random.default_rng(1)
+    n = 300
+    r = np.where(rng.random(n) < 0.35, 3.0, -1.0)
+    t = pd.DataFrame({"entry_time": pd.date_range("2023-01-02 07:00", periods=n, freq="D", tz="UTC"),
+                      "entry": 2000.0, "risk": np.where(np.arange(n) % 2, 5.0, 20.0), "r": r, "cost_r": 0.02,
+                      "exit_reason": np.where(r > 0, "target", "stop")})
+    t["exit_time"] = t["entry_time"] + pd.Timedelta(hours=5)
+    f = tmp_path / "t.csv"
+    t.to_csv(f, index=False)
+    idx = M.block_paths(n, 200, 100, 10, 0)
+    s = M.simulate(t["r"].to_numpy(), t["risk"].to_numpy(), t["entry"].to_numpy(), idx, 500, 1.0, 500, "min_lot")
+    assert s["over_pct"] > 40 and s["real_risk_median"] > 1.0          # 0.01 lot on a $20 stop = 4% of $500
+    k = M.simulate(t["r"].to_numpy(), t["risk"].to_numpy(), t["entry"].to_numpy(), idx, 500, 1.0, 500, "skip")
+    assert k["skipped_pct"] > 40 and k["real_risk_max"] <= 1.0 + 1e-9
+    assert (M.block_paths(50, 3, 25, 10, 0) < 50).all()
+    res = M.run_montecarlo(f, tmp_path / "mc", n_paths=300, length=100, since=None, risks=(1, 5))
+    lv = res["levels"]
+    assert set(lv) == {1, 5} and res["inputs"]["trades_crossing_rollover"] == 0
+    assert 0 <= lv[5]["p_lose_50pct"] <= 100 and "end_100" in lv[5]
+    assert (tmp_path / "mc" / "results.json").exists()
+    assert M.streaks(np.array([1, -1, -1, 0, 2, -1]))["longest_non_winning"] == 3

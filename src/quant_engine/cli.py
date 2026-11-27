@@ -168,6 +168,15 @@ def build_parser() -> argparse.ArgumentParser:
     lu.add_argument("--end", default="2020-01-01")
     lu.add_argument("--point", type=float, default=0.01)
     lu.add_argument("--out")
+    mc = sub.add_parser("montecarlo", help="EXP-019: Monte Carlo account survival of the frozen gold breakout")
+    mc.add_argument("--trades", default="research_data/exp016_trades_original.csv")
+    mc.add_argument("--balance", type=float, default=500.0)
+    mc.add_argument("--leverage", type=float, default=500.0)
+    mc.add_argument("--risks", default="1,2,3,4,5")
+    mc.add_argument("--paths", type=int, default=10_000)
+    mc.add_argument("--length", type=int, default=500)
+    mc.add_argument("--since", default="2023-01-01", help="use trades from this date ('' = all)")
+    mc.add_argument("--out")
     so = sub.add_parser("lb-scaleout", help="EXP-018: 3-part scale-out exit (T1/T2/T3) on the gold London breakout")
     so.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
     so.add_argument("--start", default="2015-01-01")
@@ -409,6 +418,16 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
             return 1
         print(json.dumps(summary, indent=2, default=str))
         print(f"Report: {out}/report.md")
+        return 0
+    if args.cmd == "montecarlo":
+        from .research.montecarlo import run_montecarlo
+        out = args.out or f"reports/montecarlo_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        res = run_montecarlo(args.trades, out, args.balance, args.leverage,
+                             tuple(float(x) for x in args.risks.split(",")), args.paths, args.length,
+                             since=args.since or None)
+        print(json.dumps({"inputs": res["inputs"], "levels": {k: {x: v[x] for x in ("p_lose_50pct", "p_dd_over_30pct",
+                          "p_reach_1000")} for k, v in res["levels"].items()}}, indent=2, default=str))
+        print(f"Results: {out}/results.json")
         return 0
     if args.cmd == "lb-scaleout":
         from .research.lb_scaleout import run_lb_scaleout
