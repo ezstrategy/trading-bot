@@ -105,3 +105,40 @@ Split: development 2015-2019, validation 2020-2022, test 2023+ (none untouched).
 (diff > 0, block-bootstrap p < 0.05, 100+ trades), confirm on validation with Holm, then nearby settings,
 costs x1.5 / x2, yearly results and the test part. Highest possible class here: "promising, needs
 forward validation". Part 4 explains 2019 with the same features, each checked on other years.
+
+## EXP-016 result (2026-11-27, commit be8812d, run once on MT5 data 2015-01-02 to 2026-11-27)
+
+Reproduction: **914 trades, +81.4R, trade for trade** with the original code. H5 (news) not run yet
+(no calendar); it is added as EXP-016b with an official-source calendar.
+
+Original, unchanged (historical spread + 2 pt slippage), block-bootstrap 95% interval of expectancy:
+
+| Part | Trades | Win % | PF | Expectancy | 95% interval | Max DD | Max losing streak |
+|---|---|---|---|---|---|---|---|
+| development 2015-2019 | 914 | 33.5 | 1.19 | +0.089R | +0.014 to +0.173 | 10.9% | 19 |
+| validation 2020-2022 | 545 | 32.1 | 1.25 | +0.115R | +0.010 to +0.218 | 9.0% | 13 |
+| test 2023-2026 | 695 | 32.9 | 1.24 | +0.105R | +0.021 to +0.195 | 12.5% | 27 |
+| all | 2,154 | | | +0.101R | +0.051 to +0.154 | | |
+
+Newey-West p: 0.018 / 0.017 / 0.011. Only development was out of sample for this version.
+Spread charged in 2015-2019 was much higher (median $0.17-0.40) than from 2020 ($0.08-0.14); at x2
+costs development expectancy falls to about +0.02R.
+
+Changes, one at a time (30): **1 passed the development screen** (H3 entry against the previous
+close, +0.18R vs the rest, p 0.043, 121 trades) and it **failed validation** (diff +0.21, p 0.31, not
+Holm-significant). Every exit variant B-F and both entry variants (close-confirmed, retest) were
+worse than or equal to the original on development and validation. By the pre-set code rule three
+rows are labelled "2 interesting": H3 against previous close, H4 volatility middle third (dev p 0.087,
+validation diff -0.016) and H2 break distance low third (dev p 0.17, negative on validation and test);
+the last two reverse out of sample and are **treated as rejected**. Audit notes: H2 close position and
+rejection wick are near mirror images (one test counted twice; no effect on the outcome).
+
+Part 4 (2019, 190 trades, -19.7R): no feature known before entry is weak in 2019 and also weak in
+2015-2018 and 2020+; sells (-21.7R) and with-trend days (-13.3R) carried the loss but are positive in
+every other period. Trades that closed back inside the range within 30 minutes lost -33.5R (an
+outcome, not a usable filter). 2019 is about 2.4 standard deviations below the expected year (per-
+trade SD about 1.1R): unusual but within what 12 years of trading can produce.
+
+Decision: **no modification improves the original; the original is preserved unchanged.** Original
+class: **promising, needs forward validation** (positive in every part with costs, but only 2015-2019
+was out of sample, PF 1.19-1.25 < 1.3 and drawdown up to 12.5% > 10%). Next: forward paper signals.
