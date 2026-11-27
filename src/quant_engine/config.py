@@ -176,12 +176,33 @@ class QualityConfig(BaseModel):
     daily_break_utc: tuple[int, int] = (20, 23)
     max_spike_atr: float = Field(15.0, gt=0)
     max_tick_spread: float = Field(5.0, gt=0)
+    # Open far from the previous close (x recent median candle range). Weekend gaps are real, so
+    # this is only a warning. 0 turns the check off.
+    max_gap_atr: float = Field(20.0, ge=0)
+    # Prices outside [low, high] are impossible for the instrument (bad tick / wrong scaling).
+    price_bounds: tuple[float, float] | None = None
+    # Issue kinds that make a dataset version unusable for research until the owner decides
+    # (loading it then needs allow_issues=True). Missing candles and spikes are reported only.
+    blocking_issues: list[str] = Field(default_factory=lambda: [
+        "not_utc", "unsorted", "duplicate", "misaligned", "nan", "non_positive", "invalid_ohlc",
+        "out_of_bounds", "unparseable_row"])
+
+
+class CatalogConfig(BaseModel):
+    """Versioned research datasets (``data/catalog``), see :mod:`quant_engine.data.catalog`."""
+    folder: str = "catalog"
 
 
 class DataConfig(BaseModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     download: DownloadConfig = Field(default_factory=DownloadConfig)
     quality: QualityConfig = Field(default_factory=QualityConfig)
+    catalog: CatalogConfig = Field(default_factory=CatalogConfig)
+
+    def catalog_root(self) -> str:
+        """Folder of the dataset catalog."""
+        from pathlib import Path
+        return str(Path(self.storage.root) / self.catalog.folder)
 
 
 # ---------------------------------------------------------------- strategy.yaml

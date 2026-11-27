@@ -2,7 +2,8 @@
 
 Bars are checked for: unsorted times, duplicates, timestamps off the
 candle grid, NaN values, non-positive prices, impossible OHLC (high below
-open/close, low above open/close), price spikes, and missing candles.
+open/close, low above open/close), price spikes, large open-to-previous-close
+gaps, prices outside the instrument's plausible bounds, and missing candles.
 Missing candles inside expected market closures (weekend, daily break)
 are not reported as errors.
 """
@@ -144,6 +145,18 @@ def validate_bars(bars: pd.DataFrame, tf: Timeframe, q: QualityConfig,
     spike = (rng > q.max_spike_atr * med).to_numpy() & ~nan
     for i in np.flatnonzero(spike):
         add("spike", WARNING, t[i], f"range {rng.iat[i]:.2f} is >{q.max_spike_atr}x the recent median")
+
+    if q.max_gap_atr > 0 and len(o) > 1:
+        gap = np.abs(o[1:] - c[:-1])
+        gmask = np.r_[False, gap > q.max_gap_atr * med.to_numpy()[1:]] & ~nan
+        for i in np.flatnonzero(gmask):
+            add("gap", WARNING, t[i], f"open {o[i]} is {abs(o[i] - c[i - 1]):.2f} from the previous close "
+                                      f"(>{q.max_gap_atr}x the recent median range)")
+    if q.price_bounds is not None:
+        lo_b, hi_b = q.price_bounds
+        oob = ~nan & ((l < lo_b) | (h > hi_b))
+        for i in np.flatnonzero(oob):
+            add("out_of_bounds", ERROR, t[i], f"L={l[i]} H={h[i]} outside [{lo_b}, {hi_b}]")
 
     # Missing candles between consecutive (unique, sorted) bars.
     u = t[~dup].sort_values()

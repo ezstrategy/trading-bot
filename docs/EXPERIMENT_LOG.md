@@ -274,3 +274,29 @@ code); negligible.
   beyond the stop on slippage/spread, see report note). Back-test only; not a forecast.
 - **Class**: unchanged, "promising, needs forward validation". The natural stop becomes the reference
   rule set going forward (owner rule); the capped original stays logged as EXP-016.
+
+## EXP-021 (2026-11-27): long-only D1 breakouts, reproduction plan (written before any real-data run)
+- **Source**: owner spec "LONG-ONLY BREAKOUT STRATEGY" (2026-11-27). The owner calls earlier
+  previous-month / 20-day breakout results "preliminary research findings" from outside this log;
+  they are not in this repository and are not relied on. This experiment reproduces them
+  independently with the exact rules.
+- **Hypothesis**: after a completed D1 close above (A) the previous calendar month's high or (B) the
+  previous 20 D1 highs, gold drifts up enough over 5 sessions that a 1.5 x ATR stop / 2R target BUY
+  has positive expectancy after spread, slippage and swap.
+- **Rules (fixed, version 1.0.0, rule hashes in the report)**: docs/BREAKOUT_ARCHITECTURE.md sections
+  4-5. Reset: A once per calendar month (`new_month`), B after a D1 close back at or below the
+  channel (`close_below_level`). Nothing will be changed to improve results (spec section 10).
+- **Data**: the owner's MT5 XAUUSD M5 history 2015 onward (stored bars or a catalog version), D1 built
+  from M5 (NY 17:00 day). Quality report included. No synthetic data in any reported number.
+- **Costs**: data spread, floor $0.08 (owner); 2-point slippage per fill; commission 0 (owner); swap
+  from the broker spec read with `mt5-instrument` (if missing: reported as NOT INCLUDED + stress row).
+- **Windows**: main 2023+ (owner); full history secondary; 2015-2018 / 2019-2022 / 2023+; train <2023 /
+  test >=2023; walk-forward 3y/1y with no candidates (fixed rules). Neighbourhood table information only.
+- **Screening (rulebook)**: PF > 1.3, max DD < 10% at 0.5% risk, >= 200 trades. Monthly breakouts give
+  roughly 12-15 signals a year for A, so A cannot reach 200 trades in any window: it can at most be
+  RESEARCH REQUIRED on sample size, whatever the result. Said now, before the run.
+- **Sizing**: shared risk engine, 0.5% per trade, 1% combined, correlated A+B = one budget, $500 and
+  $10,000 accounts; skipped signals reported. Expected before the run: with D1 ATR stops of roughly
+  $40-90, 0.01 lot risks about $40-90 = 8-18% of $500, so on a $500 account nearly every signal is
+  skipped at 0.5% risk.
+- **Run**: `breakout_backtest.bat` once on the PC. Result to be added below as "EXP-021 result".

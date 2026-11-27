@@ -8,10 +8,11 @@ import signals from "./pages/signals.js";
 import backtest from "./pages/backtest.js";
 import news from "./pages/news.js";
 import research from "./pages/research.js";
+import breakout from "./pages/breakout.js";
 import data from "./pages/data.js";
 import settingsPage from "./pages/settings.js";
 
-const PAGES = [market, signals, backtest, news, research, data, settingsPage];
+const PAGES = [market, signals, breakout, backtest, news, research, data, settingsPage];
 export const app = { status: null, live: false, current: null };
 
 const nav = document.getElementById("nav");

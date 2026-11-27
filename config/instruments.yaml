@@ -1,0 +1,32 @@
+# Broker-independent instrument specifications (Quant Lab module 2).
+# One entry per broker profile. Never assume two XAUUSD brokers are identical:
+# copy the default profile, name it after the broker, and fill it from MT5
+# (Symbol > Specification) or, from Phase 8, `python -m quant_engine instrument-from-mt5`.
+#
+# `confirmed` lists the fields the owner has checked. Everything else is a GUESS.
+default_profile: xauusd_default
+
+profiles:
+  xauusd_default:
+    symbol: XAUUSD                 # canonical name used in the engine
+    broker_symbol: XAUUSD          # name at the broker (XAUUSD, XAUUSDm, GOLD ...)
+    broker: unknown                # broker not chosen yet
+    contract_size: 100             # oz per 1.00 lot. GUESS (usual for XAUUSD)
+    min_lot: 0.01                  # GUESS
+    max_lot: 100                   # GUESS
+    lot_step: 0.01                 # GUESS
+    tick_size: 0.01                # smallest price change. GUESS
+    tick_value: 1.0                # account-currency value of one tick for 1.00 lot. GUESS (= 100 oz x 0.01)
+    digits: 2                      # GUESS
+    account_currency: USD          # GUESS
+    profit_currency: USD
+    commission_per_lot: 0.0        # round turn, account currency (owner, 2026-11-26/27)
+    typical_spread: 0.08           # price units, used only when the data has no spread (owner, 2026-11-26)
+    swap_long_points: null         # not known; intraday research closes before rollover
+    swap_short_points: null
+    execution:
+      fill: next_bar_open          # market orders fill at the open of the candle after the signal
+      slippage_points: 2           # per fill, points of tick_size. GUESS
+      intrabar: m1_then_stop_first # use M1 candles when present, else assume the stop was hit first
+      price_side: bid              # MT5 chart prices are bid; buys pay bid + spread
+    confirmed: [commission_per_lot, typical_spread]

@@ -24,7 +24,8 @@ def create_app(cfg: AppConfig | None = None, config_dir: str | None = None) -> F
         cfg = load_config(config_dir or os.getenv("QE_CONFIG_DIR", "config"))
         setup_logging(cfg.engine.logging.level, cfg.engine.logging.json_format, cfg.engine.logging.file)
     app = FastAPI(title="XAUUSD Quant Engine", docs_url="/api/docs", redoc_url=None)
-    app.state.ctx = AppContext(cfg=cfg, store=ParquetStore(cfg.data.storage.root))
+    app.state.ctx = AppContext(cfg=cfg, store=ParquetStore(cfg.data.storage.root),
+                               config_dir=config_dir or os.getenv("QE_CONFIG_DIR", "config"))
     for r in ROUTERS:
         app.include_router(r)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
