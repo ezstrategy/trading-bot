@@ -173,3 +173,21 @@ with a spread floor of 0.5 / 1.0 / 1.5 pips, USDJPY is +0.047R (t 1.99) / +0.035
 (t 0.79) on all data, and +0.027R (t 0.63) / +0.016R / +0.005R since 2023. The broker's own spread
 (MetaQuotes-Demo, London session) was 0.5 pip. Below the EXP-017 bar (p < 0.0125): **USDJPY REJECTED**
 (not confirmed after realistic costs). EURUSD and GBPUSD stay negative at every floor. Only XAUUSD holds.
+
+## EXP-016b (2026-11-27): H5 news, add-on run with an official-source calendar
+
+Calendar built on the owner's PC from official pages only (no rule-generated dates): FOMC statements
+(federalreserve.gov, time from each statement), BLS Employment Situation and CPI (8:30 ET, embargo time
+on each release page), BoE MPC (bankofengland.co.uk, 12:00 UK except three Bank-published exceptions).
+483 rows, 2015-01-08 to 2026-11-10. Left out: BoE emergency moves of March 2020 (no official time),
+BEA GDP and ONS releases (no reliable archive obtained). Spot checks matched the source pages.
+Same code (be8812d), run once with `--calendar`; all 30 non-H5 rows identical to EXP-016.
+
+| Change | Dev n | Dev diff | Dev p | Val diff | Val p | Test diff | Class |
+|---|---|---|---|---|---|---|---|
+| US high-impact news day only | 107 | -0.283 | 0.998 | -0.024 | 0.51 | +0.001 | rejected |
+| UK high-impact news day only | 36 | -0.008 | 0.57 | +0.666 | 0.014 | -0.21 | rejected |
+| No US / UK high-impact news | 774 | +0.214 | 0.014 (screen pass) | -0.125 | 0.88 | +0.043 | rejected |
+
+US news days were weak in 2015-2019 (-0.161R) but normal from 2020 (+0.10R). A news filter is not
+supported. 2019 is not explained by news (days without US news also lost that year).
