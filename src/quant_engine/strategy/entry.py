@@ -74,7 +74,7 @@ class Signal:
 
     @property
     def side(self) -> str:
-        return "BUY" if self.direction == 1 else "SELL"
+        return "BUY" if self.direction == 1 else "SELL" if self.direction == -1 else "BUY/SELL"
 
     @property
     def risk(self) -> float:

@@ -96,6 +96,9 @@ class SignalEngine:
 
     def _on_new_candle(self, bars, last_close, now, out) -> None:
         cfg = self.cfg.strategy
+        if cfg.mode == "london":
+            self._london(bars, last_close, now, out)
+            return
         features = MarketFeatures(bars, cfg, self.symbol.point or 0.01)
         bt = Backtester(features, cfg, self.calendar if cfg.news.enabled else None)
         bt.run()
@@ -152,6 +155,109 @@ class SignalEngine:
         log.info("signal_sent", extra={"signal_time": str(sig.time), "side": sig.side, "grade": sig.grade,
                                        "score": sig.score, "entry": sig.entry, "lots": size.lots})
         return sent.key
+
+    # ---------------------------------------------------------- london mode
+    def _size(self, entry: float, stop: float):
+        bal = self.balance() or self.live.balance_fallback
+        risk = self.cfg.engine.risk
+        costs, point = self.cfg.strategy.research.costs, self.symbol.point or 0.01
+        cost_per_unit = (costs.min_spread_points + 2 * costs.slippage_points) * point
+        return lot_size(bal, risk.per_trade_pct, entry, stop, self.symbol.contract_size or 100.0,
+                        self.symbol.volume_min or 0.01, self.symbol.volume_step or 0.01,
+                        cost_per_unit=cost_per_unit, commission_per_lot=costs.commission_per_lot,
+                        skip_if_over=risk.skip_if_min_lot_over)
+
+    def _london(self, bars, last_close, now, out) -> None:
+        """London breakout: setup at 01:00 NY, then follow-ups replayed from the closed candles."""
+        from ..strategy import london as lb
+        strat = self.cfg.strategy
+        sp = strat.research.costs.min_spread_points * (self.symbol.point or 0.01)
+        known = lb.days_known_at(bars[Timeframe.M5], bars[Timeframe.H4], strat, sp, last_close)
+        days = {d.setup_time.isoformat(): d for d in known if d.setup_time}
+        # follow-ups for setups already sent
+        for sent in self.state.active():
+            if sent.signal.strategy != "london":
+                continue
+            d = days.get(sent.key)
+            if d is None:
+                sent.status, sent.outcome = CLOSED, "history no longer available"
+                continue
+            out["followups"] += self._london_follow(sent, d)
+        if not known or known[-1].setup_time is None:      # today's Asian range is still forming
+            return
+        d = known[-1]
+        key = d.setup_time.isoformat()
+        if key in self.state.signals or not any(e.kind == lb.SETUP for e in d.events):
+            return
+        if d.side or d.finished:      # engine was not running when the setup formed: never send late
+            self.state.log("logged", f"London setup {d.setup_time:%Y-%m-%d} missed (already "
+                           f"{'triggered' if d.side else 'over'} when the engine saw it)", now, key, sent=False)
+            self.state.signals[key] = SentSignal(self._london_signal(d, sp), None, 0.0, status=CLOSED,
+                                                 outcome="missed (engine offline at setup)")
+            return
+        sides, skipped = {}, {}
+        for s_, lvl in d.levels.items():
+            size = self._size(lvl.entry, lvl.stop)
+            if size.skipped:
+                skipped[s_] = size.note
+            else:
+                sides[s_] = (size.lots, size.note)
+        sig = self._london_signal(d, sp)
+        if not sides:
+            mid = self._send("skipped", msg.london_skipped_text(d, self.symbol.name, skipped), key)
+            self.state.signals[key] = SentSignal(sig, mid, 0.0, "; ".join(skipped.values()), status=CLOSED,
+                                                 outcome="skipped: 0.01 lot over the risk limit",
+                                                 events_sent=len(d.events))
+            log.info("signal_skipped_risk", extra={"signal_time": key, "mode": "london"})
+            return
+        text = msg.london_setup_text(d, self.symbol.name, sides, skipped, self.cfg.engine.risk.per_trade_pct,
+                                     self._digits(), strat.london.is_tested_version())
+        mid = self._send("signal", text, key)
+        first = sides[max(sides)] if len(sides) == 1 else sides.get(1, next(iter(sides.values())))
+        sent = SentSignal(sig, mid, first[0], first[1], events_sent=1,
+                          extra={"lots": {str(k): v[0] for k, v in sides.items()},
+                                 "skipped_sides": {str(k): v for k, v in skipped.items()}})
+        self.state.signals[key] = sent
+        out["new_signal"] = key
+        log.info("signal_sent", extra={"signal_time": key, "mode": "london", "sides": sorted(sides)})
+
+    def _london_signal(self, d, sp: float):
+        """A :class:`Signal` record of the setup (direction 0 = both sides) for state and the dashboard."""
+        from ..strategy.entry import Signal
+        lv = d.levels.get(d.side) or d.levels.get(1) or d.levels.get(-1)
+        direction = d.side or (lv.side if len(d.levels) == 1 else 0)
+        reasons = [f"Asian range {d.range_low:.2f}-{d.range_high:.2f}", f"H4 trend {d.trend}"]
+        return Signal(d.setup_time, 0, direction, lv.entry, lv.stop, lv.target, lv.target, None, 0, "LB", 0,
+                      float("nan"), "london", sp, reasons=reasons, strategy="london", close_by=d.close_time)
+
+    def _london_follow(self, sent: SentSignal, d) -> int:
+        from ..strategy import london as lb
+        new = d.events[sent.events_sent:]
+        for ev in new:
+            if ev.kind == lb.TRIGGERED:
+                s = sent.signal
+                s.direction, s.entry, s.stop_loss, s.tp1 = d.side, d.entry, d.initial_stop, d.target
+                s.tp2 = d.target
+                lots = sent.extra.get("lots", {}).get(str(d.side))
+                if lots is None:      # the side that fired was skipped for risk: nothing to follow
+                    self._send("logged", f"🚫 {s.side} broke out, but that side was skipped (risk limit). "
+                               f"No trade today.", sent.key, reply_to=sent.message_id)
+                    sent.status, sent.outcome = CLOSED, "skipped side triggered"
+                    sent.events_sent = len(d.events)
+                    return 1
+                sent.lots = lots
+            self._send(ev.kind, msg.london_event_text(ev, d, self._digits()), sent.key, reply_to=sent.message_id)
+        sent.events_sent = len(d.events)
+        if d.finished:
+            last = d.events[-1]
+            sent.status = CLOSED
+            sent.outcome = {lb.TARGET: "target", lb.STOP: "stop loss", lb.BE_STOP: "breakeven",
+                            lb.SESSION_CLOSE: "closed 16:00 NY", lb.CANCELLED: "cancelled",
+                            lb.NO_SETUP: "no setup"}.get(last.kind, last.kind)
+            sent.r = None if d.r is None else round(d.r, 4)
+        else:
+            sent.status = OPEN if d.side else PENDING
+        return len(new)
 
     def _follow(self, sent: SentSignal, t, h, l, c) -> int:
         s = sent.signal

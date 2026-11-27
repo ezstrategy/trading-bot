@@ -44,7 +44,8 @@ def test_dukascopy_download_resume_and_backtest(config_dir, tmp_path, monkeypatc
     assert cli.run(args, fetch=fetch) == 0 and len(fetch.calls) == n   # resume: nothing fetched again
 
     rep = tmp_path / "rep"
-    assert cli.run(["--config", str(config_dir), "backtest", "--source", "dukascopy", "--out", str(rep)]) == 0
+    assert cli.run(["--config", str(config_dir), "backtest", "--source", "dukascopy", "--mode", "regime",
+                    "--out", str(rep)]) == 0
     summary = json.loads((rep / "summary.json").read_text())
     assert "Dukascopy" in summary["meta"]["data"] and summary["overall"]["trades"] >= 1
     md = (rep / "report.md").read_text()

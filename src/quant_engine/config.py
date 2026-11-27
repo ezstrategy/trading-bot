@@ -312,6 +312,42 @@ class ModesConfig(BaseModel):
     sideways: SidewaysModeConfig = Field(default_factory=SidewaysModeConfig)
 
 
+class LondonConfig(BaseModel):
+    """London breakout signal mode (strategy/london.py).
+
+    Defaults are the tested rules: EXP-016 original (EXP-015 trend version) with the EXP-020
+    natural stop. Any other value is an UNTESTED strategy and the signal says so.
+    """
+
+    range_start_ny: str = "20:00"        # Asian range, New York time (the evening before)
+    range_end_ny: str = "01:00"
+    close_ny: str = "16:00"              # anything still open is closed at market then
+    buffer_pct: float = Field(0.02, ge=0)    # stop-order distance beyond the range, % of price
+    target_r: float = Field(3.0, gt=0)
+    breakeven_r: float | None = Field(1.0, gt=0)
+    trend_filter: bool = True            # trade only in the H4 trend direction (neutral: both ways)
+    stop_cap_pct: float | None = None    # None = natural stop (other side of the range), never tightened
+    min_range_candles: int = Field(50, ge=1)
+
+    @field_validator("range_start_ny", "range_end_ny", "close_ny")
+    @classmethod
+    def _hhmm(cls, v: str) -> str:
+        hh, mm = (int(x) for x in str(v).split(":"))
+        if not (0 <= hh < 24 and 0 <= mm < 60):
+            raise ValueError("time must be HH:MM")
+        return f"{hh:02d}:{mm:02d}"
+
+    @staticmethod
+    def minutes(v: str) -> int:
+        """'HH:MM' -> minutes after midnight."""
+        hh, mm = (int(x) for x in v.split(":"))
+        return hh * 60 + mm
+
+    def is_tested_version(self) -> bool:
+        """True when every rule equals the version that was tested (EXP-016 + EXP-020)."""
+        return self.model_dump() == LondonConfig().model_dump()
+
+
 class EntryConfig(BaseModel):
     min_score: int = Field(65, ge=0, le=100)
     a_plus_score: int = Field(80, ge=0, le=100)
@@ -427,7 +463,8 @@ class StrategyConfig(BaseModel):
     liquidity: LiquidityConfig = Field(default_factory=LiquidityConfig)
     sessions: SessionsConfig = Field(default_factory=SessionsConfig)
     volatility: VolatilityConfig = Field(default_factory=VolatilityConfig)
-    mode: Literal["regime", "v1", "bullish", "bearish", "sideways", "patterns"] = "regime"
+    mode: Literal["london", "regime", "v1", "bullish", "bearish", "sideways", "patterns"] = "regime"
+    london: LondonConfig = Field(default_factory=LondonConfig)
     news: NewsConfig = Field(default_factory=NewsConfig)
     modes: ModesConfig = Field(default_factory=ModesConfig)
     entry: EntryConfig = Field(default_factory=EntryConfig)
