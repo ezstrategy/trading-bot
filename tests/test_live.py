@@ -141,7 +141,8 @@ def test_live_signal_then_followups_as_replies(tmp_path, replay_bars):
     res = _step(eng, clk, 12)
     assert sum(1 for r in res if r["new_signal"]) == 1
     texts = [t for t, _ in rec.sent]
-    assert "SELL LIMIT" in texts[0] and "0.16 lot" in texts[0] and "no trade was placed" in texts[0]
+    # 2% of $10,000 at the stop, spread floor + slippage included (owner rule 2026-11-27; was 0.16 at 0.5%)
+    assert "SELL LIMIT" in texts[0] and "0.63 lot (2% risk)" in texts[0] and "no trade was placed" in texts[0]
     assert texts[1:] == ["✅ Filled at 2,382.78", "❌ Stopped out (−1R)"]
     assert all(reply == 1 for _, reply in rec.sent[1:])              # follow-ups reply to the signal
     st = EngineState(tmp_path / "signals")                             # persisted
