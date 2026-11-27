@@ -100,14 +100,14 @@ def test_app_reports_mt5_errors_without_crashing(config_dir, monkeypatch):
     assert any("Connecting to MT5 failed" in e.value for e in at.error)
 
 
-def test_dashboard_command_launches_streamlit_on_localhost(monkeypatch, config_dir):
+def test_classic_dashboard_command_launches_streamlit_on_localhost(monkeypatch, config_dir):
     calls = {}
 
     def fake_call(cmd, env):
         calls["cmd"], calls["env"] = cmd, env
         return 0
     monkeypatch.setattr("subprocess.call", fake_call)
-    assert cli.run(["--config", str(config_dir), "dashboard", "--port", "8600"]) == 0
+    assert cli.run(["--config", str(config_dir), "dashboard", "--classic", "--port", "8600"]) == 0
     cmd = calls["cmd"]
     assert cmd[1:4] == ["-m", "streamlit", "run"] and cmd[4].endswith("app.py")
     assert cmd[cmd.index("--server.address") + 1] == "localhost" and "8600" in cmd

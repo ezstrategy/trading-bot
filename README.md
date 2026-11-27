@@ -54,13 +54,27 @@ signals (Phase 3 and later).
 
 ## Dashboard
 
-A simple local web page to operate the engine (signals only, it cannot trade):
+A local web app with a glass-style design (signals only, it cannot trade):
 
 ```powershell
+pip install -r requirements.txt         # once: adds fastapi, uvicorn, Markdown
 python -m quant_engine dashboard        # or double-click start_dashboard.bat
+python -m quant_engine dashboard --classic   # the old Streamlit page, if you need it
 ```
 
-It opens at http://localhost:8501 (only reachable from your own PC) and gives you:
+It opens at http://localhost:8501 (only reachable from your own PC). Pages: **Market**, **Signals**,
+**Backtest**, **News**, **Research**, **Data** and **Settings**; on a phone-sized window the side menu
+becomes a bottom tab bar. How it is built (`src/quant_engine/webapp/`):
+
+* `api.py` + `routes/*.py`: a FastAPI JSON API (one module per page) that calls the same read-only
+  functions as before (`dashboard/services.py`, `dashboard/chart.py`). API reference at `/api/docs`.
+* `static/`: plain HTML, CSS and JavaScript modules, no build step. `css/glass.css` holds the theme
+  tokens; `js/ui.js` the shared cards, tables and charts; `js/pages/*.js` one file per page.
+  To add a page: add `routes/<name>.py` (list it in `routes/__init__.py`) and `js/pages/<name>.js`
+  (list it in `js/app.js`).
+* Charts use the Plotly.js that ships with the `plotly` Python package, so no CDN is needed.
+
+It gives you:
 
 * **Check MT5 connection**: broker symbol, server-time offset, last tick in UTC.
 * **Download history**: pick days and timeframes; the download resumes where it stopped.

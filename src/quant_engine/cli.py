@@ -211,13 +211,19 @@ def build_parser() -> argparse.ArgumentParser:
     rn.add_argument("--once", action="store_true", help="run one cycle and exit")
     sub.add_parser("news", help="refresh the economic calendar and list upcoming blocks")
     sub.add_parser("telegram-test", help="send a test message to the Telegram chat in .env")
-    db = sub.add_parser("dashboard", help="open the local web dashboard")
+    db = sub.add_parser("dashboard", help="open the local web app (glass dashboard)")
     db.add_argument("--port", type=int, default=8501)
+    db.add_argument("--classic", action="store_true", help="open the old Streamlit dashboard instead")
+    db.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
     return p
 
 
-def _dashboard(config_dir: str | None, port: int) -> int:
-    """Launch Streamlit on localhost only."""
+def _dashboard(config_dir: str | None, port: int, classic: bool = False, open_browser: bool = True) -> int:
+    """Launch the web app (or, with ``classic``, the Streamlit dashboard) on localhost only."""
+    if not classic:
+        from .webapp.api import serve
+        print(f"Dashboard: http://localhost:{port}  (Ctrl+C to stop)")
+        return serve(config_dir, port, open_browser=open_browser)
     import os
     import subprocess
     from pathlib import Path
@@ -364,7 +370,7 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
     """Entry point used by ``main`` and by tests (with a fake MT5 module)."""
     args = build_parser().parse_args(argv)
     if args.cmd == "dashboard":
-        return _dashboard(args.config, args.port)
+        return _dashboard(args.config, args.port, args.classic, not args.no_browser)
     try:
         cfg = load_config(args.config)
     except ConfigError as exc:
