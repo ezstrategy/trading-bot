@@ -90,3 +90,18 @@ on data never used to choose it, with costs, after a multiple-test correction. I
 screening targets (PF 1.19 < 1.3, DD 10.9% > 10%), 2019 was a losing year, and it still needs walk-
 forward, a nearby-parameter check and an independent audit. Published version: REJECTED as a stand-
 alone strategy (not significant). Rules are not changed after this result (rule 7).
+
+## EXP-016 (2026-11-27): Phase 2 research on the London breakout trend version, plan (written before the run)
+
+Owner brief "Phase 2 research" (2026-11-27). Code: `research/lb_phase2.py`, `python -m quant_engine lb-phase2`.
+The original (EXP-012 / EXP-015 trend version) is frozen as `ORIGINAL`; the run first reproduces EXP-015
+(914 trades, +81.4R) and stops if it cannot. One change at a time against the original:
+H1 Asian range width (past-250-day percentile thirds of range / daily ATR), H2 breakout candle (body,
+close position, break distance, rejection wick; on close-confirmed entries, thirds fixed on 2015-2019),
+H3 previous-day levels (room to the opposing level < 1R / 1-3R / 3R+; side of previous close),
+H4 volatility (daily ATR % of price, past-250-day thirds), H5 news (only with a verified historical
+calendar file), H6 entry (close-confirmed, retest within 12 candles), exits B-F against A (= original).
+Split: development 2015-2019, validation 2020-2022, test 2023+ (none untouched). Screen on development
+(diff > 0, block-bootstrap p < 0.05, 100+ trades), confirm on validation with Holm, then nearby settings,
+costs x1.5 / x2, yearly results and the test part. Highest possible class here: "promising, needs
+forward validation". Part 4 explains 2019 with the same features, each checked on other years.

@@ -16,6 +16,7 @@
     python -m quant_engine classics [--start 2020-01-01]   (well-known public strategies, backtested)
     python -m quant_engine london [--start 2020-01-01]     (polish the London breakout, checked on unseen data)
     python -m quant_engine gtc [--start 2020-01-01]        (owner's GTC-SBR strategy: experiments A-F, audit report)
+    python -m quant_engine lb-phase2                       (EXP-016: London breakout Phase 2 research, one run)
     python -m quant_engine london-oos                      (EXP-015: one-shot London breakout test on 2015-2019)
     python -m quant_engine study [--start 2020-01-01]      (rule 2: how gold behaves in each regime, development data)
     python -m quant_engine run [--dry-run] [--once]      (live signals to Telegram; never trades)
@@ -165,6 +166,14 @@ def build_parser() -> argparse.ArgumentParser:
     lu.add_argument("--end", default="2020-01-01")
     lu.add_argument("--point", type=float, default=0.01)
     lu.add_argument("--out")
+    l2 = sub.add_parser("lb-phase2", help="EXP-016: Phase 2 research on the London Asian-range breakout")
+    l2.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    l2.add_argument("--start", default="2015-01-01")
+    l2.add_argument("--end")
+    l2.add_argument("--point", type=float, default=0.01)
+    l2.add_argument("--calendar", default="data/news/history.csv",
+                    help="historical calendar CSV (time UTC, currency, impact, title); H5 is skipped without it")
+    l2.add_argument("--out")
     rn = sub.add_parser("run", help="live signal engine: watch MT5, send signals to Telegram (never trades)")
     rn.add_argument("--dry-run", action="store_true", help="print messages instead of sending to Telegram")
     rn.add_argument("--once", action="store_true", help="run one cycle and exit")
@@ -382,6 +391,20 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
             summary = run_study(cfg, store, ds, out, pd.Timestamp(args.start, tz="UTC") if args.start else None,
                                 pd.Timestamp(args.end, tz="UTC") if args.end else None, args.part,
                                 f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)")
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2, default=str))
+        print(f"Report: {out}/report.md")
+        return 0
+    if args.cmd == "lb-phase2":
+        from .research.lb_phase2 import run_lb_phase2
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/lb_phase2_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        try:
+            summary = run_lb_phase2(cfg, store, ds, args.point, out, pd.Timestamp(args.start, tz="UTC"),
+                                    pd.Timestamp(args.end, tz="UTC") if args.end else None, args.calendar,
+                                    f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)")
         except ValueError as exc:
             print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
             return 1
