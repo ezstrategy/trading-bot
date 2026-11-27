@@ -241,3 +241,20 @@ code); negligible.
 - **Conclusion**: do not use 5%. On $500, 2% with the skip rule is the survival-based choice and 3%
   the upper limit; for real 1-2% sizing on every signal the account needs about $1,400-2,850.
   Strategy class unchanged ("promising, needs forward validation"); forward paper trading first.
+
+## EXP-020 (2026-11-27): natural stop first, position sizing second, plan (written before the run)
+- **Owner rule (verbatim in substance)**: stop at the strategy's natural invalidation (opposite Asian range
+  boundary), never tightened or moved to fit the account; size for at most 2% of equity with all costs;
+  skip when 0.01 lot would risk more; never raise risk to avoid a skip; report how many signals are skipped.
+- **Finding before the run**: the EXP-016 original caps the stop at 0.6% of price, which TIGHTENS the stop
+  on wide-range days: 548 of 2,154 trades (25%), and 313 of the 695 trades since 2023 (45%). That breaks
+  the owner's rule, so the main version drops the cap ("natural stop"); the capped original stays
+  unchanged and is shown next to it (rule 18, nothing overwritten).
+- **Code**: `lb_trades` takes `stop_cap` (default 0.006 = original; None = natural). `live/sizing.lot_size`
+  gains costs (`cost_per_unit`, `commission_per_lot`) and `skip_if_over`; the signal engine now skips
+  (logs, sends nothing) when 0.01 lot would exceed `risk.per_trade_pct`, set to 2.0 in config/engine.yaml.
+- **Run**: `python -m quant_engine lb-natural` (lb_natural.bat), balances $500 / $1,000 / $2,500 / $5,000,
+  windows since 2023 and all history, equity compounding, margin checked at 1:500. One run.
+- **Pre-check on the capped original's trade list (not the answer, the cap still tightens stops)**: at
+  $500 since 2023, 300 of 695 signals (43%) would be skipped; none at $1,000 or more; none over full
+  history from $500 (2015 prices made stops small and the account grows before stops widen).

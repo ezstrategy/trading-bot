@@ -236,3 +236,49 @@ def test_montecarlo_sizing_min_lot_and_skip(tmp_path):
     assert 0 <= lv[5]["p_lose_50pct"] <= 100 and "end_100" in lv[5]
     assert (tmp_path / "mc" / "results.json").exists()
     assert M.streaks(np.array([1, -1, -1, 0, 2, -1]))["longest_non_winning"] == 3
+
+
+def test_natural_stop_is_never_tightened(config_dir, tmp_path):
+    from quant_engine.config import load_config
+    from quant_engine.research.classics import lb_day_groups
+    from quant_engine.research.lb_natural import NATURAL
+    from quant_engine.timeframes import Timeframe
+    cfg = load_config(config_dir)
+    _, b = _store(tmp_path)
+    m5 = b[Timeframe.M5]
+    g = lb_day_groups(m5, cfg.strategy.sessions)
+    nat = P.lb_trades(m5, 0.08, NATURAL, None, g)
+    assert len(nat) > 10 and not nat["stop_capped"].any()
+    assert np.allclose(nat["stop"], nat["natural_stop"])
+    # a tight cap forces the original to tighten; the flag records exactly those trades
+    cap = P.lb_trades(m5, 0.08, {**P.ORIGINAL, "stop_cap": 0.0005}, None, g)
+    assert cap["stop_capped"].any()
+    c = cap[cap["stop_capped"]]
+    assert (c["risk"] < (c["entry"] - c["natural_stop"]).abs() - 1e-9).all()
+
+
+def test_sized_run_skips_instead_of_moving_the_stop():
+    from quant_engine.research.lb_natural import sized_run
+    tr = pd.DataFrame({"entry_time": pd.date_range("2024-01-01", periods=4, freq="D", tz="UTC"),
+                       "entry": 2000.0, "stop": [1995.0, 1980.0, 1995.0, 1995.0],
+                       "risk": [5.0, 20.0, 5.0, 5.0], "r": [-1.05, 3.0, 2.9, -1.05], "cost_r": 0.05})
+    s, led = sized_run(tr, 500.0, 2.0)
+    # 2% of $500 = $10; 0.01 lot at a $20 stop loses $21 with costs -> skipped, stop untouched
+    assert s["signals"] == 4 and s["skipped"] == 1 and not led["taken"].iloc[1]
+    assert led["min_lot_risk_pct"].iloc[1] == pytest.approx(2100 / 494.75)   # equity after trade 1
+    assert led["lots"].iloc[0] == 0.01 and s["worst_loss%"] <= 2.0 + 1e-9
+    assert s["max_risk%"] <= 2.0 + 1e-9
+    big, _ = sized_run(tr, 5000.0, 2.0)
+    assert big["skipped"] == 0
+
+
+def test_lb_natural_cli(config_dir, tmp_path, monkeypatch):
+    from quant_engine import cli
+    _store(tmp_path, days=160, seed=5)
+    monkeypatch.chdir(tmp_path)
+    rep = tmp_path / "nat"
+    assert cli.run(["--config", str(config_dir), "lb-natural", "--start", "2026-06-01", "--out", str(rep)]) == 0
+    md = (rep / "report.md").read_text()
+    for k in ("natural stop (owner rule, main)", "original, stop capped at 0.6%", "skipped%", "start_balance"):
+        assert k in md, k
+    assert (rep / "ledger_natural_500.csv").exists() and (rep / "results.json").exists()

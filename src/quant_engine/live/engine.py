@@ -123,13 +123,27 @@ class SignalEngine:
                 self.state.log("logged", f"{sig.side} {sig.grade}: skipped, a signal is still open", now,
                                sig.time.isoformat(), sent=False)
                 continue
-            out["new_signal"] = self._publish(sig)
+            key = self._publish(sig, now)
+            if key:
+                out["new_signal"] = key
 
-    def _publish(self, sig) -> str:
+    def _publish(self, sig, now: pd.Timestamp | None = None) -> str | None:
         bal = self.balance() or self.live.balance_fallback
-        size = lot_size(bal, self.cfg.engine.risk.per_trade_pct, sig.entry, sig.stop_loss,
+        risk = self.cfg.engine.risk
+        costs, point = self.cfg.strategy.research.costs, self.symbol.point or 0.01
+        # costs not inside entry / stop: spread floor + slippage on both fills (owner rule 2026-11-27)
+        cost_per_unit = (costs.min_spread_points + 2 * costs.slippage_points) * point
+        size = lot_size(bal, risk.per_trade_pct, sig.entry, sig.stop_loss,
                         self.symbol.contract_size or 100.0, self.symbol.volume_min or 0.01,
-                        self.symbol.volume_step or 0.01)
+                        self.symbol.volume_step or 0.01, cost_per_unit=cost_per_unit,
+                        commission_per_lot=costs.commission_per_lot, skip_if_over=risk.skip_if_min_lot_over)
+        if size.skipped:
+            # natural stop first: never move the stop or raise the risk to make a signal fit
+            self.state.log("logged", f"{sig.side} {sig.grade}: {size.note}", now or self.now(),
+                           sig.time.isoformat(), sent=False)
+            log.info("signal_skipped_risk", extra={"signal_time": str(sig.time), "side": sig.side,
+                                                   "balance": bal, "note": size.note})
+            return None
         text = msg.signal_text(sig, self.symbol.name, size.lots, self.cfg.engine.risk.per_trade_pct,
                                self._digits(), self.cfg.strategy.entry.expiry_candles * 5, size.note)
         mid = self._send("signal", text, sig.time.isoformat())

@@ -174,10 +174,13 @@ def lb_trades(m5: pd.DataFrame, sp: float, p: dict, regime: np.ndarray | None, g
                     break
             if i0 is None:
                 continue
+        cap = p.get("stop_cap", 0.006)       # None = natural stop, never tightened (EXP-020)
         if side == 1:
-            stop = max(lo if p["stop"] == "range" else mid, px_in * (1 - 0.006))
+            nat = lo if p["stop"] == "range" else mid
+            stop = nat if cap is None else max(nat, px_in * (1 - cap))
         else:
-            stop = min((hi if p["stop"] == "range" else mid) + sp, px_in * (1 + 0.006))
+            nat = (hi if p["stop"] == "range" else mid) + sp
+            stop = nat if cap is None else min(nat, px_in * (1 + cap))
         risk = abs(px_in - stop)
         if risk <= 0 or (px_in - stop) * side <= 0:
             continue
@@ -188,6 +191,7 @@ def lb_trades(m5: pd.DataFrame, sp: float, p: dict, regime: np.ndarray | None, g
         lvl = buy_lvl if side == 1 else sell_lvl
         back = [k for k in range(i0, min(i0 + FALSE_BREAK_BARS, len(c))) if (c[k] < hi if side == 1 else c[k] > lo)]
         rows.append({"day": d, "entry_i": i0, "entry_time": t[i0], "exit_time": t[j],
+                     "stop_capped": bool(stop != nat), "natural_stop": nat,
                      "side": "BUY" if side == 1 else "SELL", "entry": px_in, "exit": px_out, "stop": stop,
                      "risk": risk, "r": side * (px_out - px_in) / risk, "exit_reason": why,
                      "range_hi": hi, "range_lo": lo, "trigger_after_fill": entry == "stop",

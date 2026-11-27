@@ -10,7 +10,8 @@ timeframes:
   collect: [M1, M5, M15, H1, H4]  # everything the data layer downloads
 
 risk:
-  per_trade_pct: 0.5              # used by later phases for position sizing in signals
+  per_trade_pct: 2.0              # MAX risk per signal, costs included, at the strategy's own stop (owner 2026-11-27)
+  skip_if_min_lot_over: true      # 0.01 lot would risk more than per_trade_pct -> skip; never move the stop
 
 live:                             # python -m quant_engine run  (signals only, never trades)
   poll_seconds: 10                # how often MT5 is checked for a newly closed M5 candle

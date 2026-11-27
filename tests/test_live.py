@@ -33,6 +33,17 @@ def test_lot_size_rounds_down_to_step_and_flags_min_lot():
     assert tiny.lots == 0.01 and "minimum lot" in tiny.note
 
 
+def test_lot_size_natural_stop_costs_and_skip():
+    # $500 at 2% = $10. Stop $8 + $0.06 costs per oz -> $806 per lot -> 0.01 lot ($8.06)
+    s = lot_size(500, 2.0, 2400.0, 2392.0, 100, 0.01, 0.01, cost_per_unit=0.06, skip_if_over=True)
+    assert s.lots == 0.01 and s.risk_money == pytest.approx(8.06) and not s.skipped
+    # stop $12: 0.01 lot loses $12.06 > $10 -> skipped, never resized
+    w = lot_size(500, 2.0, 2400.0, 2388.0, 100, 0.01, 0.01, cost_per_unit=0.06, skip_if_over=True)
+    assert w.skipped and w.lots == 0 and "2.41%" in w.note
+    c = lot_size(500, 2.0, 2400.0, 2392.0, 100, 0.01, 0.01, commission_per_lot=300, skip_if_over=True)
+    assert c.skipped    # commission counted: $8 + $3 per 0.01 lot > $10
+
+
 # ------------------------------------------------------------------- telegram
 def test_telegram_sends_html_with_reply_and_never_needs_hardcoded_token(monkeypatch):
     calls = []

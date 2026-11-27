@@ -16,6 +16,7 @@
     python -m quant_engine classics [--start 2020-01-01]   (well-known public strategies, backtested)
     python -m quant_engine london [--start 2020-01-01]     (polish the London breakout, checked on unseen data)
     python -m quant_engine gtc [--start 2020-01-01]        (owner's GTC-SBR strategy: experiments A-F, audit report)
+    python -m quant_engine lb-natural                      (EXP-020: natural stop + 2% sizing, skipped-signal count)
     python -m quant_engine lb-scaleout                     (EXP-018: 3-part T1/T2/T3 exit on the gold breakout, one run)
     python -m quant_engine lb-symbols                      (EXP-017: same London breakout on silver / FX, one run)
     python -m quant_engine lb-phase2                       (EXP-016: London breakout Phase 2 research, one run)
@@ -177,6 +178,15 @@ def build_parser() -> argparse.ArgumentParser:
     mc.add_argument("--length", type=int, default=500)
     mc.add_argument("--since", default="2023-01-01", help="use trades from this date ('' = all)")
     mc.add_argument("--out")
+    ln = sub.add_parser("lb-natural", help="EXP-020: natural stop first, 2% sizing second (skip count)")
+    ln.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
+    ln.add_argument("--start", default="2015-01-01")
+    ln.add_argument("--end")
+    ln.add_argument("--point", type=float, default=0.01)
+    ln.add_argument("--balances", default="500,1000,2500,5000")
+    ln.add_argument("--risk", type=float, default=None, help="max risk %% (default: engine risk.per_trade_pct)")
+    ln.add_argument("--leverage", type=float, default=500)
+    ln.add_argument("--out")
     so = sub.add_parser("lb-scaleout", help="EXP-018: 3-part scale-out exit (T1/T2/T3) on the gold London breakout")
     so.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
     so.add_argument("--start", default="2015-01-01")
@@ -428,6 +438,24 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
         print(json.dumps({"inputs": res["inputs"], "levels": {k: {x: v[x] for x in ("p_lose_50pct", "p_dd_over_30pct",
                           "p_reach_1000")} for k, v in res["levels"].items()}}, indent=2, default=str))
         print(f"Results: {out}/results.json")
+        return 0
+    if args.cmd == "lb-natural":
+        from .research.lb_natural import run_lb_natural
+        ds = dukascopy_dataset(canonical) if args.source == "dukascopy" else canonical
+        out = args.out or f"reports/lb_natural_{args.source}_{pd.Timestamp.now(tz='UTC'):%Y%m%dT%H%M%S}"
+        try:
+            res = run_lb_natural(cfg, store, ds, args.point, out, pd.Timestamp(args.start, tz="UTC"),
+                                 pd.Timestamp(args.end, tz="UTC") if args.end else None,
+                                 f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)",
+                                 tuple(float(x) for x in args.balances.split(",")),
+                                 args.risk or cfg.engine.risk.per_trade_pct, args.leverage)
+        except ValueError as exc:
+            print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
+            return 1
+        print(json.dumps([{k: r[k] for k in ("version", "window", "start_balance", "signals", "taken", "skipped",
+                                              "skipped%", "end_balance", "max_dd%")} for r in res["sizing"]],
+                         indent=1, default=str))
+        print(f"Report: {res['report']}")
         return 0
     if args.cmd == "lb-scaleout":
         from .research.lb_scaleout import run_lb_scaleout

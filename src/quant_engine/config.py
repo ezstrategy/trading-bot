@@ -49,6 +49,8 @@ class TimeframesConfig(BaseModel):
 
 class RiskConfig(BaseModel):
     per_trade_pct: float = Field(0.5, gt=0, le=5)
+    # owner rule 2026-11-27: skip a signal when the minimum lot would risk more than per_trade_pct
+    skip_if_min_lot_over: bool = True
 
 
 class LoggingConfig(BaseModel):

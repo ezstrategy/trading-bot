@@ -6,7 +6,9 @@ If a request conflicts with them, stop and ask the owner.
 ## What this project is
 - A **signals-only** engine for **XAUUSD** intraday scalping.
 - Entry timeframe **M5**, confirmation **M15**, context **H1/H4**.
-- Risk model: **0.5% per trade** (used only to size the numbers shown in a signal).
+- Risk model (owner, 2026-11-27): **natural stop first, sizing second**. The stop is the strategy's own
+  invalidation level and is never tightened or moved to fit the account; size for at most **2%** of equity
+  at that stop, costs included; if 0.01 lot would risk more, **skip** the signal. (Was 0.5%.)
 - Signals are delivered to Telegram (from Phase 2+). Broker not selected yet; data comes from MetaTrader 5.
 - Other symbols are out of scope until the owner asks.
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -276,7 +277,68 @@ def render_news() -> None:
     st.dataframe(df, hide_index=True, width="stretch")
 
 
-tab_market, tab_signals, tab_bt, tab_news = st.tabs(["Market", "Signals", "Backtest", "News"])
+def render_research() -> None:
+    st.caption("Read only. Every number here comes from a committed, reproducible research run "
+               "(see docs/EXPERIMENT_LOG.md). Signals only: nothing here trades.")
+    tr = services.gold_trades()
+    st.subheader("Gold London breakout (original rules, frozen)")
+    if tr.empty:
+        st.info(f"Trade list not found ({services.GOLD_TRADES}).")
+    else:
+        win = st.radio("Window", ["Since 2023 (main)", "Full history"], horizontal=True, key="res_win")
+        x = tr[tr["entry_time"] >= pd.Timestamp("2023-01-01", tz="UTC")] if win.startswith("Since") else tr
+        summ = services.trade_summary(x)
+        for col, (k, v) in zip(st.columns(len(summ)), summ.items()):
+            col.metric(k, "-" if v is None else v)
+        st.markdown("**Equity in R (costs included)**")
+        st.line_chart(x.set_index("entry_time")["r"].cumsum())
+        yr = x.assign(year=x["entry_time"].dt.year).groupby("year")["r"].agg(
+            trades="size", total_R="sum", R_per_trade="mean").round(3).reset_index()
+        st.dataframe(yr, hide_index=True, width="stretch")
+    reps = services.research_reports()
+    st.subheader("Natural stop + 2% risk: skipped signals")
+    nat = reps.get("lb_natural")
+    if nat and (nat / "results.json").exists():
+        res = json.loads((nat / "results.json").read_text())
+        sz = pd.DataFrame(res["sizing"])
+        st.dataframe(sz[[c for c in ("version", "window", "start_balance", "signals", "taken", "skipped",
+                                     "skipped%", "end_balance", "return%", "max_dd%", "worst_loss%")
+                         if c in sz]], hide_index=True, width="stretch")
+        led = nat / "ledger_natural_500.csv"
+        if led.exists():
+            lg = pd.read_csv(led, parse_dates=["entry_time"])
+            st.markdown("**$500 account, natural stop, 2% max risk (all history)**")
+            st.line_chart(lg.set_index("entry_time")["equity"])
+    else:
+        st.info("Not run on this PC yet: double-click lb_natural.bat.")
+    st.subheader("Monte Carlo survival ($500, 1:500)")
+    mc = reps.get("montecarlo")
+    if mc and (mc / "results.json").exists():
+        res = json.loads((mc / "results.json").read_text())
+        keys = ["p_lose_30pct", "p_lose_50pct", "p_dd_over_30pct", "p_dd_over_50pct", "p_reach_1000",
+                "skipped_pct", "median_max_dd_pct"]
+        rows = [{"policy": pol, "risk %": k, **{c: round(v.get(c, float("nan")), 1) for c in keys}}
+                for pol, lv in (("skip if 0.01 lot too big", res.get("skip_policy", {})),
+                                ("always at least 0.01", res.get("levels", {}))) for k, v in lv.items()]
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+    else:
+        st.info("Not run on this PC yet: python -m quant_engine montecarlo")
+    st.subheader("All research reports")
+    if reps:
+        pick = st.selectbox("Experiment", list(reps), format_func=services.RESEARCH.get, key="res_pick")
+        f = reps[pick] / "report.md"
+        st.caption(str(reps[pick]))
+        if f.exists():
+            st.markdown(f.read_text(encoding="utf-8"))
+    else:
+        st.info("No research reports in reports/ yet.")
+    log_md = Path("docs/EXPERIMENT_LOG.md")
+    if log_md.exists():
+        with st.expander("Experiment log"):
+            st.markdown(log_md.read_text(encoding="utf-8"))
+
+
+tab_market, tab_signals, tab_bt, tab_news, tab_res = st.tabs(["Market", "Signals", "Backtest", "News", "Research"])
 with tab_market:
     if live:
         st.fragment(render, run_every=interval)()
@@ -288,3 +350,5 @@ with tab_bt:
     render_backtest()
 with tab_news:
     render_news()
+with tab_res:
+    render_research()

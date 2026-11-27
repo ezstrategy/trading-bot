@@ -133,3 +133,25 @@ def test_app_signals_backtest_and_news_tabs(config_dir, cfg, filled, monkeypatch
     assert not at.exception, [e.value for e in at.exception]
     assert any("Saved to reports" in x.value for x in at.success)
     assert "Win rate %" in [m.label for m in at.metric]
+
+
+def test_research_tab_shows_gold_results_and_reports(config_dir, monkeypatch, tmp_path):
+    import json
+    import shutil
+    from pathlib import Path
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "research_data").mkdir()
+    shutil.copy(Path(__file__).parents[1] / "research_data" / "exp016_trades_original.csv", tmp_path / "research_data")
+    nat = tmp_path / "reports" / "lb_natural_mt5_20261127T000000"
+    nat.mkdir(parents=True)
+    (nat / "report.md").write_text("# EXP-020 test report")
+    (nat / "results.json").write_text(json.dumps({"sizing": [{"version": "natural", "window": "all", "start_balance": 500,
+                                                               "signals": 10, "taken": 7, "skipped": 3}]}))
+    assert services.research_reports()["lb_natural"] == Path("reports") / nat.name
+    s = services.trade_summary(services.gold_trades())
+    assert s["trades"] == 2154
+    at = _app(config_dir, monkeypatch).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "R/trade" in [m.label for m in at.metric]
+    assert any("EXP-020 test report" in m.value for m in at.markdown)
+    assert any("Not run on this PC yet: python -m quant_engine montecarlo" in i.value for i in at.info)
