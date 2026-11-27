@@ -25,6 +25,7 @@ below are re-stated under rule 14.
 | EXP-011 | 2026-11-26 | Published strategies work on gold as published | 9 strategies, no tuning, $0.08 spread | 2020-2026 | see below | see below |
 | EXP-012 | 2026-11-26 | Changes improve the London breakout | 360-version grid; best chosen on older data | 2020-2026 M5 | best (H4 trend filter, 3R, BE 1R, close 16:00 NY): older +0.103R / 752 tr, unseen +0.144R / 491 tr, p 0.007; max DD about 26R | RESEARCH REQUIRED (chosen from a grid; violates rule 7) |
 | EXP-013 | 2026-11-26 | 50%+ win-rate versions; other symbols | 793-version grid on 5 symbols | — | **cancelled before running** (rule 7) | — |
+| EXP-015 | 2026-11-27 | The London breakout edge exists before 2020 | 2 versions fixed in advance, one run, untouched 2015-2019 | 2015-2019 M5 | trend version +0.089R, PF 1.19, 914 tr, p 0.020 (passes Bonferroni 0.025); published +0.033R, p 0.21 | trend version: RESEARCH REQUIRED (survives untouched data, misses PF 1.3 / DD 10% targets); published: REJECTED as stand-alone |
 
 ## EXP-011 detail: public strategies, no tuning, $0.08 spread, no commission / slippage
 
@@ -65,3 +66,27 @@ Data: MT5 XAUUSD M5, 2020-01-02 to 2024-02-22 (first 60% of 2020+). No costs, no
 Reading: at the 1-hour horizon on M5, the H4 regime does not change gold's short-term behaviour in
 this period. A trend-continuation engine has no support from simple drift or breakout follow-through.
 Decision: no strategy; informs the engine hypotheses (rule 2).
+
+## EXP-015 (2026-11-27): London breakout, one-shot test on untouched 2015-2019 data
+
+Hypothesis: the London-breakout edge seen on 2020-2026 (EXP-011 / EXP-012) is not specific to that
+period. Two versions fixed in advance in `research/london_oos.py` (commit 080d3a8), run **once** on
+MT5 XAUUSD M5 2015-01-02 to 2019-12-31, which no London-breakout test had used. Costs: historical bar
+spread (at least $0.08), 2 points slippage per fill, commission 0. 0.5% risk compounded. Bonferroni
+over 2 versions (p < 0.025). M5 quality issues reported by validate_bars: 82 spikes, 200 gaps.
+
+| Version | Trades | Win % | PF | Expectancy | Net (0.5%) | Max DD | Max losing streak | p |
+|---|---|---|---|---|---|---|---|---|
+| published (mql5 777540) | 731 | 43.5 | 1.07 | +0.033R | +11.6% | 11.3% (23.4R) | 10 | 0.211 |
+| trend version (EXP-012) | 914 | 33.5 | 1.19 | +0.089R | +47.3% | 10.9% (22.3R) | 19 | **0.020** |
+
+Trend version detail: BUY +0.095R / SELL +0.083R; bull +0.142R, bear +0.157R, sideways +0.072R,
+uncertain +0.035R. By year (R): 2015 +38.8, 2016 +18.9, 2017 +30.9, 2018 +12.5, **2019 -19.6**.
+"asia" in the session table = entries 01:00-03:00 NY (orders open at 01:00 NY, rule-11 London starts
+03:00 NY), not a bug. Published version: losses come from bearish regime (-0.117R, 183 tr).
+
+Decision (rule 14): **trend version RESEARCH REQUIRED.** It is the first result in this log that held
+on data never used to choose it, with costs, after a multiple-test correction. It does not meet the
+screening targets (PF 1.19 < 1.3, DD 10.9% > 10%), 2019 was a losing year, and it still needs walk-
+forward, a nearby-parameter check and an independent audit. Published version: REJECTED as a stand-
+alone strategy (not significant). Rules are not changed after this result (rule 7).
