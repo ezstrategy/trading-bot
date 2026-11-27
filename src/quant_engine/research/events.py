@@ -54,9 +54,10 @@ class EventTable:
 
 
 def regime_per_bar(m5_times: pd.DatetimeIndex, h4: pd.DataFrame, regimes: pd.Series,
-                   tf: Timeframe = Timeframe.M5) -> np.ndarray:
-    """H4 regime of the last H4 candle closed at each candle's close (no look-ahead)."""
-    closes = pd.DatetimeIndex(h4["time"]) + Timeframe.H4.delta
+                   tf: Timeframe = Timeframe.M5, ctx_tf: Timeframe = Timeframe.H4) -> np.ndarray:
+    """Regime of the last context candle (``ctx_tf``, H4 by default) closed at each candle's close
+    (no look-ahead)."""
+    closes = pd.DatetimeIndex(h4["time"]) + ctx_tf.delta
     decision = m5_times + tf.delta
     k = closes.searchsorted(decision, side="right") - 1
     reg = regimes.to_numpy(dtype=object)

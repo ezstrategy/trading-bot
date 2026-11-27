@@ -274,3 +274,20 @@ code); negligible.
   beyond the stop on slippage/spread, see report note). Back-test only; not a forecast.
 - **Class**: unchanged, "promising, needs forward validation". The natural stop becomes the reference
   rule set going forward (owner rule); the capped original stays logged as EXP-016.
+
+## EXP-021 (2026-11-27): regime behaviour study on H1 instead of H4, plan (written before the run)
+- **Owner ask**: "why our 3 mode strategy not worked?" then "So use h1". The 3-mode idea (bull: buy the dip,
+  bear: sell the rally, sideways: fade breakouts) needs gold to behave differently per regime. EXP-014 found
+  no difference with the H4 regime. Hypothesis: a faster H1 regime does separate behaviour.
+- **Test**: the EXP-014 study unchanged except the regime is worked out on H1 (same regime4 settings,
+  counted in H1 candles: EMA 50, slope over 10 candles, etc.; labels used only after the H1 candle closes).
+  `python -m quant_engine study --regime-tf H1`, MT5 XAUUSD M5, development part only (first 60% of 2020+,
+  about 2020-01 to 2024-02, same as EXP-014). One run, no settings changed after it.
+- **Pass bar (fixed now, before costs)**: H1 regimes "behave differently" only if at least one of:
+  (a) a drift cell with |t| >= 3.0 (about 5% after Bonferroni over the 16 regime x session cells);
+  (b) a breakout or sweep row with >= 500 decided cases and >= 55% first-way;
+  (c) a last-hour vs next-hour correlation of |r| >= 0.05 in a regime;
+  and the effect must point the way the matching mode needs (continuation in bull / bear, reversal in
+  sideways). If none passes: stop, the 3 modes are not backtested on H1 (rule 7, no fishing).
+- **If it passes**: one pre-registered 3-mode backtest with the H1 regime, costs included, 2023+ as the
+  owner's main window and full history secondary; plan written in this log before that run.

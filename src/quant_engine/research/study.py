@@ -4,7 +4,8 @@
 strategy and nothing is optimised. By default only the **development** part (first 60% by
 time) is studied, so later validation and out-of-sample tests stay separate.
 
-Questions answered per four-state H4 regime (bullish / bearish / sideways / uncertain):
+Questions answered per four-state regime (bullish / bearish / sideways / uncertain), worked out on
+H4 by default or on H1 with ``--regime-tf H1`` (EXP-021: same settings, counted in H1 candles):
 
 1. How much time the market spends in each regime and how long a spell lasts.
 2. Drift: the average next-hour move (in M5 ATR) by rule-11 session, in the regime's direction.
@@ -60,13 +61,13 @@ def _rate(x: np.ndarray) -> dict:
 
 def run_study(cfg: AppConfig, store: ParquetStore, dataset: str, out_dir: str | Path,
               start: pd.Timestamp | None = None, end: pd.Timestamp | None = None,
-              part: str = "development", source_note: str = "") -> dict:
+              part: str = "development", source_note: str = "", regime_tf: Timeframe = Timeframe.H4) -> dict:
     """Write ``report.md`` with the five tables described in the module docs."""
     sc = cfg.strategy
     m5 = store.read_bars(dataset, Timeframe.M5, start, end)
-    h4 = store.read_bars(dataset, Timeframe.H4, start, end)
+    h4 = store.read_bars(dataset, regime_tf, start, end)      # regime candles (H4, or H1 for EXP-021)
     if m5.empty or h4.empty:
-        raise ValueError(f"No stored {dataset} M5/H4 data")
+        raise ValueError(f"No stored {dataset} M5/{regime_tf.value} data")
     t_all = pd.DatetimeIndex(m5["time"])
     cut = t_all[0] + (t_all[-1] - t_all[0]) * 0.6
     if part == "development":
@@ -75,7 +76,7 @@ def run_study(cfg: AppConfig, store: ParquetStore, dataset: str, out_dir: str | 
     o, h, l, c = (m5[k].to_numpy(float) for k in ("open", "high", "low", "close"))
     a = atr_fn(m5, 14).to_numpy(float)
     h4s = regime4_series(h4, sc.research.regime4)
-    reg = regime_per_bar(t, h4, h4s)
+    reg = regime_per_bar(t, h4, h4s, ctx_tf=regime_tf)
     sess = session_of(t)
     n = len(c)
 
@@ -88,8 +89,8 @@ def run_study(cfg: AppConfig, store: ParquetStore, dataset: str, out_dir: str | 
         share = float((lab == s).mean() * 100) if len(lab) else 0
         lens = spells.loc[s].to_numpy() if s in spells.index.get_level_values(0) else np.array([])
         t1.append({"regime": s, "time_pct": round(share, 1), "spells": int(len(lens)),
-                   "median_spell_h4": float(np.median(lens)) if len(lens) else np.nan,
-                   "mean_spell_h4": round(float(lens.mean()), 1) if len(lens) else np.nan})
+                   f"median_spell_{regime_tf.value.lower()}": float(np.median(lens)) if len(lens) else np.nan,
+                   f"mean_spell_{regime_tf.value.lower()}": round(float(lens.mean()), 1) if len(lens) else np.nan})
 
     # 2. drift: next-hour move in ATR (signed by regime direction for trends)
     fwd = np.full(n, np.nan)
@@ -154,7 +155,8 @@ def run_study(cfg: AppConfig, store: ParquetStore, dataset: str, out_dir: str | 
     md = ["# Gold behaviour by market regime (descriptive study, rule 2)\n",
           f"- **data**: {source_note or dataset}",
           f"- **studied part**: {part} ({t[0]:%Y-%m-%d} to {t[-1]:%Y-%m-%d})",
-          "- **regime**: four-state H4 module (bullish / bearish / sideways / uncertain), known at each H4 close",
+          f"- **regime**: four-state module on **{regime_tf.value}** (bullish / bearish / sideways / uncertain), "
+          f"known at each {regime_tf.value} close; settings counted in {regime_tf.value} candles",
           "- Nothing here is a strategy or a profit claim; costs are not included. Moves are in M5 ATR(14).\n",
           "## 1. Time in each regime\n", _table(tabs["1_time_in_regime"], list(tabs["1_time_in_regime"].columns)),
           "\n## 2. Drift: average next-hour move by session (trend regimes signed in their direction)\n",
@@ -171,4 +173,4 @@ def run_study(cfg: AppConfig, store: ParquetStore, dataset: str, out_dir: str | 
           "\n_Descriptive research on past data. Signals only._\n"]
     (out / "report.md").write_text("\n".join(md), encoding="utf-8")
     log.info("study_done", extra={"part": part, "bars": n})
-    return {"part": part, "from": f"{t[0]:%Y-%m-%d}", "to": f"{t[-1]:%Y-%m-%d}", "report": str(out / "report.md")}
+    return {"part": part, "regime_tf": regime_tf.value, "from": f"{t[0]:%Y-%m-%d}", "to": f"{t[-1]:%Y-%m-%d}", "report": str(out / "report.md")}

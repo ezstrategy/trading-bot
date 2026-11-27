@@ -103,6 +103,29 @@ def test_study_cli_uses_development_part_only(config_dir, tmp_path, monkeypatch)
         assert k in md
 
 
+def test_study_on_h1_regime_and_no_look_ahead(config_dir, tmp_path, monkeypatch):
+    """EXP-021: the study can work the regime out on H1; an H1 label is used only after that candle closes."""
+    from quant_engine import cli
+    from quant_engine.data.storage import ParquetStore
+    from quant_engine.research.events import regime_per_bar
+    from quant_engine.timeframes import Timeframe
+    from .synthetic import TFS, synthetic_bars
+    monkeypatch.chdir(tmp_path)
+    b = synthetic_bars(days=150, seed=4)
+    store = ParquetStore(tmp_path / "data")
+    for tf in TFS:
+        store.write_bars("XAUUSD", tf, b[tf])
+    rep = tmp_path / "h1"
+    assert cli.run(["--config", str(config_dir), "study", "--regime-tf", "H1", "--out", str(rep)]) == 0
+    md = (rep / "report.md").read_text()
+    assert "module on **H1**" in md and "median_spell_h1" in md
+    h1 = pd.DataFrame({"time": pd.date_range("2026-01-05 00:00", periods=3, freq="h", tz="UTC")})
+    lab = pd.Series(["bullish", "bearish", "sideways"])
+    m5 = pd.DatetimeIndex(["2026-01-05 00:50", "2026-01-05 00:55", "2026-01-05 01:55"], tz="UTC")
+    # 00:50 candle closes 00:55: the 00:00 H1 candle is not closed yet; 00:55 closes at 01:00: it is
+    assert list(regime_per_bar(m5, h1, lab, ctx_tf=Timeframe.H1)) == ["neutral", "bullish", "bearish"]
+
+
 def test_study_sweep_test_is_fair_on_a_random_walk(config_dir, tmp_path, monkeypatch):
     """No edge in the data -> sweep 'reversal' rate near 50% (the old wick-based levels gave ~60%+)."""
     from quant_engine import cli

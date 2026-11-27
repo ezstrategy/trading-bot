@@ -162,6 +162,7 @@ def build_parser() -> argparse.ArgumentParser:
     sy.add_argument("--start", default="2020-01-01")
     sy.add_argument("--end")
     sy.add_argument("--part", choices=["development", "all"], default="development")
+    sy.add_argument("--regime-tf", choices=["H4", "H1"], default="H4", help="timeframe the regime is worked out on")
     sy.add_argument("--out")
     lu = sub.add_parser("london-oos", help="EXP-015: one-shot London breakout test on untouched 2015-2019 data")
     lu.add_argument("--source", choices=["mt5", "dukascopy"], default="mt5")
@@ -422,7 +423,8 @@ def run(argv: Sequence[str] | None = None, mt5_module: Any | None = None,
         try:
             summary = run_study(cfg, store, ds, out, pd.Timestamp(args.start, tz="UTC") if args.start else None,
                                 pd.Timestamp(args.end, tz="UTC") if args.end else None, args.part,
-                                f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)")
+                                f"{'MT5 broker' if args.source == 'mt5' else 'Dukascopy'} bars for {canonical} (UTC)",
+                                Timeframe.parse(args.regime_tf))
         except ValueError as exc:
             print(f"{exc}. Run: python -m quant_engine download", file=sys.stderr)
             return 1
