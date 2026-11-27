@@ -167,3 +167,9 @@ understated. USDJPY: development +0.019R (p 0.26), validation +0.141R (p 0.003),
 2026 negative; at x2 costs development is negative. Its verdict waits for a re-cost with a realistic
 0.5-1.5 pip spread (cost assumption only, rules unchanged). Gold reference differs slightly from EXP-016
 (2,152 vs 2,154 trades) because this run floors every instrument at 1 point instead of gold's $0.08.
+
+**Note (2026-11-27), EXP-017 FX cost check** (from the trades files; rules unchanged, cost assumption only):
+with a spread floor of 0.5 / 1.0 / 1.5 pips, USDJPY is +0.047R (t 1.99) / +0.035R (t 1.47) / +0.019R
+(t 0.79) on all data, and +0.027R (t 0.63) / +0.016R / +0.005R since 2023. The broker's own spread
+(MetaQuotes-Demo, London session) was 0.5 pip. Below the EXP-017 bar (p < 0.0125): **USDJPY REJECTED**
+(not confirmed after realistic costs). EURUSD and GBPUSD stay negative at every floor. Only XAUUSD holds.
