@@ -202,3 +202,21 @@ even. Same costs as EXP-016. Compared trade by trade with the original (paired b
 "Better" needs: 2015-2019 diff > 0 with p < 0.05, 2020-2022 diff > 0 with p < 0.0125, and 2023+ diff > 0.
 Reported with 2023+ as the main window, plus last 2 years and full history; win rate both as trade net
 > 0 and as T1 reached; minimum account for 3 x 0.01 lots at 0.5% risk.
+
+## EXP-018 result (2026-11-27, commit cc29fef, run once)
+
+| Exit (same 2,154 entries) | Since 2023: win % | PF | R / trade | Max DD | Longest losing run | vs original (p) |
+|---|---|---|---|---|---|---|
+| Original 3R, BE 1R | 32.9 | 1.24 | +0.105 | 12.5% | 27 | - |
+| S1 1/2/3R, BE after T1 | 52.5 | 1.16 | +0.068 | 12.4% | 6 | -0.037 (0.995) |
+| S2 0.75/1.5/3R | 58.3 | 1.11 | +0.045 | 11.3% | 5 | -0.060 (0.993) |
+| S3 1/2/4R | 52.5 | 1.15 | +0.064 | 12.2% | 6 | -0.041 (0.995) |
+| S4 1/2/3R, no BE | 45.0 | 1.18 | +0.084 | 12.7% | 15 | -0.021 (0.77) |
+
+All four are worse than the original in every window (2015-2019, 2020-2022, 2023+, last 2 years);
+verdict **not better, REJECTED**. Scaling out raises the win rate and shortens losing runs but gives up
+profit, because two thirds of each winner exit before 3R. Minimum account for 3 x 0.01 lots at 0.5%:
+$4,113 at the median stop, $15,380 for 95% of trades. Audit: the original's 27-loss run counts break-
+even exits (-0.035R after costs) as losses. One trade (of 2,154) exits stop/breakeven/breakeven: the
+break-even step can trigger on the fill candle while a target cannot (same convention as the original
+code); negligible.
