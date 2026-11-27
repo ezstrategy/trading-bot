@@ -167,6 +167,16 @@ python -m quant_engine news              # refresh the calendar and list upcomin
   results by bullish/bearish/neutral market) and **News** tabs.
 * State survives restarts (`data/signals/state.json`); a restart never re-sends a signal.
 
+## Quant Lab (research platform)
+
+The owner's Quant Lab specification is being built in phases on top of this engine. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the plan and [docs/DATA_MANAGEMENT.md](docs/DATA_MANAGEMENT.md)
+for Phase 2: versioned, never-modified research datasets (`data-import`, `data-snapshot`,
+`data-list`, `data-show`, `data-verify`, `import_csv.bat`, `snapshot_data.bat`) and broker
+instrument profiles (`config/instruments.yaml`, `instrument`). Phases 3-9 (event-driven engine,
+strategy plug-ins, analytics, experiment registry, validation, dashboard tab, MT5 import, audit):
+[docs/QUANT_LAB.md](docs/QUANT_LAB.md) and [docs/PHASES_3_9_REPORT.md](docs/PHASES_3_9_REPORT.md).
+
 ## Requirements
 
 * **Windows** PC with the **MetaTrader 5 terminal** installed and logged in to a broker

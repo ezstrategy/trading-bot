@@ -276,7 +276,7 @@ def render_news() -> None:
     st.dataframe(df, hide_index=True, width="stretch")
 
 
-tab_market, tab_signals, tab_bt, tab_news = st.tabs(["Market", "Signals", "Backtest", "News"])
+tab_market, tab_signals, tab_bt, tab_news, tab_lab = st.tabs(["Market", "Signals", "Backtest", "News", "Quant Lab"])
 with tab_market:
     if live:
         st.fragment(render, run_every=interval)()
@@ -288,3 +288,9 @@ with tab_bt:
     render_backtest()
 with tab_news:
     render_news()
+with tab_lab:
+    from quant_engine.dashboard.lab_page import render_lab
+    try:
+        render_lab(cfg, TIME_ZONES[tz_label])
+    except Exception as exc:  # shown, never crashes the rest of the page
+        st.error(f"Quant Lab problem: {exc}")

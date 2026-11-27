@@ -1,0 +1,31 @@
+# Quant Lab research settings (modules 6, 7, 9). See docs/QUANT_LAB.md.
+symbol: XAUUSD
+instrument_profile: ""            # empty = default_profile in instruments.yaml
+initial_equity: 10000
+risk_pct: 0.5                     # owner: 0.5% per trade
+
+split:                            # chronological, by time (rulebook rule 7)
+  development: 0.6
+  validation: 0.2                 # the rest (0.2) is the untouched test period
+warmup_days: 60                   # history loaded before a window so indicators are ready (not traded)
+
+walk_forward:
+  train_months: 24
+  test_months: 6
+  max_grid: 12                    # at most this many parameter sets per window (no mass optimisation)
+  min_trades: 20                  # a grid point needs this many training trades to be chosen
+  select_by: expectancy_r
+
+cost_stress:                      # each scenario is run on development + validation (never the test)
+  - {name: "as tested"}
+  - {name: "spread x1.5", spread_multiplier: 1.5}
+  - {name: "spread x2", spread_multiplier: 2.0}
+  - {name: "slippage 5 points", slippage_points: 5}
+  - {name: "commission $7/lot", commission_per_lot: 7}
+
+acceptance:                       # rulebook screening targets (rule 9) used by the audit
+  min_trades: 200
+  min_profit_factor: 1.3
+  max_drawdown_pct: 10
+  min_walk_forward_positive_share: 0.5
+  alpha: 0.05                     # divided by the number of variants tested in the programme
