@@ -151,3 +151,19 @@ Instruments fixed in advance: XAGUSD, EURUSD, GBPUSD, USDJPY; Bonferroni over 4 
 bootstrap and Newey-West both required). Costs: each instrument's own historical MT5 bar spread (floor 1
 point) + 2 points slippage per fill (GUESS), commission 0; stress x1.5 / x2. All MT5 history from 2015.
 Run once; nothing is tuned per instrument. Best possible class: "promising, needs forward validation".
+
+## EXP-017 result (2026-11-27, commit 985a8cc, run once; MT5 history 2015-01-02 to 2026-11-27)
+
+| Instrument | Trades | Win % | PF | Expectancy | 95% interval | Max DD | Since 2023 | Last 2 yrs | Years + | Verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| XAUUSD (ref.) | 2,152 | 33.0 | 1.23 | +0.102R | +0.051 to +0.155 | 12.6% | +0.109R | +0.118R | 11/12 | reference |
+| XAGUSD | 2,214 | 20.5 | 0.60 | -0.290R | -0.348 to -0.229 | 96.2% | -0.107R | -0.057R | 0/12 | REJECTED |
+| EURUSD | 2,170 | 27.0 | 0.97 | -0.016R | -0.070 to +0.037 | 37.6% | -0.011R | +0.043R | 6/12 | REJECTED |
+| GBPUSD | 2,181 | 25.0 | 0.93 | -0.036R | -0.094 to +0.018 | 43.5% | -0.023R | -0.045R | 4/12 | REJECTED |
+| USDJPY | 2,179 | 40.1 | 1.14 | +0.054R | +0.011 to +0.097 | 12.4% | +0.033R | +0.026R | 9/12 | p 0.0085 (< 0.0125), see note |
+
+Note: stored MT5 FX spreads are 0 on 17-31% of M5 candles (floored at 1 point = 0.1 pip), so FX costs are
+understated. USDJPY: development +0.019R (p 0.26), validation +0.141R (p 0.003), test +0.033R (p 0.22),
+2026 negative; at x2 costs development is negative. Its verdict waits for a re-cost with a realistic
+0.5-1.5 pip spread (cost assumption only, rules unchanged). Gold reference differs slightly from EXP-016
+(2,152 vs 2,154 trades) because this run floors every instrument at 1 point instead of gold's $0.08.
