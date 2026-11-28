@@ -54,12 +54,27 @@ class AppContext:
     def has_data(self) -> bool:
         return all(m for _, m in self.fingerprint())
 
-    def features(self, point: float):
-        """(bars, MarketFeatures) for the stored history, cached per data version and point."""
-        key = (self.fingerprint(), point)
+    def features(self, point: float, at: pd.Timestamp | None = None):
+        """(bars, MarketFeatures) for recent stored history, cached per data version, point and window.
+
+        Only the last ``data.dashboard.market_days`` days before ``at`` (default: the newest
+        stored candle) are used, because the full multi-year history is far too slow to
+        analyse on every page load. Trimming drops older bars only, so nothing after ``at``
+        is introduced (snapshots still apply their own as-of cut).
+        """
+        days = self.cfg.data.dashboard.market_days
+        key0 = self.fingerprint()
         with self._cache_lock:
+            if ("bars", key0) not in self._cache:
+                self._cache.clear()   # keep only the newest data version
+                self._cache[("bars", key0)] = services.load_bars(self.store, self.canonical)
+            full = self._cache[("bars", key0)]
+            anchor = at if at is not None else services.default_decision_time(full)
+            cut = (anchor - pd.Timedelta(days=days)).floor("D")
+            key = (key0, point, cut)
             if key not in self._cache:
-                bars = services.load_bars(self.store, self.canonical)
-                self._cache.clear()   # keep only the newest version
+                bars = {tf: b[b["time"] >= cut].reset_index(drop=True) for tf, b in full.items()}
+                for k in [k for k in self._cache if k[0] != "bars"]:
+                    del self._cache[k]   # one feature window at a time
                 self._cache[key] = (bars, services.build_features(bars, self.cfg, point))
             return self._cache[key]

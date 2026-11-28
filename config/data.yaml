@@ -21,3 +21,8 @@ quality:
   daily_break_utc: [20, 23]              # [start_hour, end_hour) window where a break is expected
   max_spike_atr: 15.0                    # bar range larger than this x median range is flagged
   max_tick_spread: 5.0                   # ask - bid above this (USD) is flagged
+
+dashboard:
+  # The Market page builds structure features on this many days before the chosen time.
+  # The full history (2015+) takes many minutes; 60 days loads in seconds.
+  market_days: 60

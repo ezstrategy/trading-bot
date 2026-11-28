@@ -31,7 +31,7 @@ def market(tf: str = "M5", lookback: int = 180, overlays: str = ",".join(OVERLAY
         raise HTTPException(400, str(exc)) from exc
     lookback = max(20, min(int(lookback), 1500))
     try:
-        bars, feats = c.features(point or c.point)
+        bars, feats = c.features(point or c.point, when)
         snap = feats.snapshot(when or services.default_decision_time(bars))
     except ValueError as exc:
         return {"ready": False, "message": str(exc)}

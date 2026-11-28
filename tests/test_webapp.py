@@ -73,8 +73,29 @@ def test_market_review_time_uses_only_known_data(client, filled):
     assert client.get("/api/market", params={"tf": "W9"}).status_code == 400
 
 
-def test_mt5_errors_are_reported_not_crashing(client):
-    r = client.post("/api/mt5/check")   # MetaTrader5 is not installed here
+def test_market_page_analyses_only_a_recent_window(cfg, filled):
+    """The Market page trims old history (config data.dashboard.market_days) so it loads fast."""
+    from quant_engine.webapp.context import AppContext
+    cfg.data.dashboard.market_days = 2
+    ctx = AppContext(cfg=cfg, store=filled)
+    bars, _ = ctx.features(0.01)
+    full = services.load_bars(filled, cfg.engine.instrument)
+    end = services.default_decision_time(full)
+    cut = (end - pd.Timedelta(days=2)).floor("D")
+    m5 = bars[Timeframe.M5]
+    assert m5["time"].iat[0] >= cut and m5["time"].iat[-1] == full[Timeframe.M5]["time"].iat[-1]
+    assert len(m5) < len(full[Timeframe.M5])
+    at = pd.Timestamp("2026-11-20 12:00", tz="UTC")   # an older review time gets its own window
+    bars_at, _ = ctx.features(0.01, at)
+    assert bars_at[Timeframe.M5]["time"].iat[0] >= (at - pd.Timedelta(days=2)).floor("D")
+    assert bars_at[Timeframe.M5]["time"].iat[0] < m5["time"].iat[0]
+
+
+def test_mt5_errors_are_reported_not_crashing(client, monkeypatch):
+    # Simulate MT5 being unavailable, so the test is the same on a PC where it is installed.
+    import sys
+    monkeypatch.setitem(sys.modules, "MetaTrader5", None)
+    r = client.post("/api/mt5/check")
     assert r.status_code == 502 and "Connecting to MT5 failed" in r.json()["detail"]
     assert client.post("/api/mt5/refresh").status_code == 502
 

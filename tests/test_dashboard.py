@@ -94,6 +94,9 @@ def test_app_without_data_asks_for_download(config_dir, monkeypatch):
 
 
 def test_app_reports_mt5_errors_without_crashing(config_dir, monkeypatch):
+    # Simulate MT5 being unavailable, so the test is the same on a PC where it is installed.
+    import sys
+    monkeypatch.setitem(sys.modules, "MetaTrader5", None)
     at = _app(config_dir, monkeypatch).run()
     at.sidebar.button[0].click().run()   # "Check MT5 connection" without MetaTrader5 installed
     assert not at.exception

@@ -178,10 +178,17 @@ class QualityConfig(BaseModel):
     max_tick_spread: float = Field(5.0, gt=0)
 
 
+class DashboardDataConfig(BaseModel):
+    """How much stored history the dashboard's Market page analyses."""
+
+    market_days: int = Field(60, gt=0)
+
+
 class DataConfig(BaseModel):
     storage: StorageConfig = Field(default_factory=StorageConfig)
     download: DownloadConfig = Field(default_factory=DownloadConfig)
     quality: QualityConfig = Field(default_factory=QualityConfig)
+    dashboard: DashboardDataConfig = Field(default_factory=DashboardDataConfig)
 
 
 # ---------------------------------------------------------------- strategy.yaml
